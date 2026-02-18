@@ -32,8 +32,11 @@ const fastify = Fastify({
 await fastify.register(cors, {
   origin: isProduction
     ? (origin, cb) => {
-        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-        if (!origin || allowedOrigins.includes(origin)) {
+        const allowed = process.env.ALLOWED_ORIGINS?.trim();
+        const allowedOrigins = allowed ? allowed.split(',').map((o) => o.trim()) : [];
+        if (allowedOrigins.length === 0) {
+          cb(null, true);
+        } else if (!origin || allowedOrigins.includes(origin)) {
           cb(null, true);
         } else {
           cb(new Error('Not allowed by CORS'), false);
