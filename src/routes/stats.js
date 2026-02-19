@@ -13,7 +13,7 @@ export const statsRoutes = async (fastify) => {
    * Get season overview stats
    */
   fastify.get('/season', async (request, reply) => {
-    const { seasonId, unit } = request.query;
+    const { seasonId } = request.query;
 
     let targetSeasonId = seasonId;
 
@@ -30,9 +30,7 @@ export const statsRoutes = async (fastify) => {
       }
     }
 
-    const preferredUnit = unit || request.user.preferences?.units || 'gallons';
-    const stats = await statsService.getSeasonStats(targetSeasonId, preferredUnit);
-
+    const stats = await statsService.getSeasonStats(targetSeasonId);
     return { stats };
   });
 
@@ -40,7 +38,7 @@ export const statsRoutes = async (fastify) => {
    * Get zone-level stats
    */
   fastify.get('/zones', async (request, reply) => {
-    const { seasonId, unit } = request.query;
+    const { seasonId } = request.query;
 
     let targetSeasonId = seasonId;
 
@@ -57,9 +55,7 @@ export const statsRoutes = async (fastify) => {
       }
     }
 
-    const preferredUnit = unit || request.user.preferences?.units || 'gallons';
-    const zoneStats = await statsService.getZoneStats(targetSeasonId, preferredUnit);
-
+    const zoneStats = await statsService.getZoneStats(targetSeasonId);
     return { zoneStats };
   });
 

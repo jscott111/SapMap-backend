@@ -126,8 +126,7 @@ export const collectionRoutes = async (fastify) => {
       userId: request.user.id,
       zoneId,
       date: date || new Date().toISOString().split('T')[0],
-      volume: volume || 0,
-      volumeUnit: volumeUnit || 'gallons',
+      volume: volume ?? 0,
       sugarContent,
       notes,
       temperature,
@@ -147,7 +146,8 @@ export const collectionRoutes = async (fastify) => {
       return reply.code(404).send({ error: 'Collection not found' });
     }
 
-    const updated = await collectionRepository.update(request.params.id, request.body);
+    const { volumeUnit: _dropped, ...body } = request.body;
+    const updated = await collectionRepository.update(request.params.id, body);
     return { collection: updated };
   });
 

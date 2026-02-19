@@ -41,22 +41,11 @@ class CollectionRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Get total volume for a season
+   * Get total volume for a season (liters)
    */
-  async getTotalVolume(seasonId, unit = 'gallons') {
+  async getTotalVolume(seasonId) {
     const collections = await this.findBySeasonId(seasonId);
-    return collections.reduce((total, col) => {
-      let volume = col.volume || 0;
-      // Convert if needed
-      if (col.volumeUnit !== unit) {
-        if (unit === 'liters' && col.volumeUnit === 'gallons') {
-          volume = volume * 3.78541;
-        } else if (unit === 'gallons' && col.volumeUnit === 'liters') {
-          volume = volume / 3.78541;
-        }
-      }
-      return total + volume;
-    }, 0);
+    return collections.reduce((total, col) => total + (col.volume || 0), 0);
   }
 
   /**
