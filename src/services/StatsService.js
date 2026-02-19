@@ -36,26 +36,19 @@ export function convertVolume(volume, fromUnit, toUnit) {
 
 class StatsServiceClass {
   /**
-   * Get comprehensive stats for a season
+   * Get comprehensive stats for a season (all volumes in liters)
    */
-  async getSeasonStats(seasonId, unit = 'gallons') {
+  async getSeasonStats(seasonId) {
     const [collections, boils, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
       boilRepository.findBySeasonId(seasonId),
       zoneRepository.findBySeasonId(seasonId),
     ]);
 
-    // Total sap collected
-    let totalSapCollected = 0;
-    for (const col of collections) {
-      let volume = col.volume || 0;
-      if (col.volumeUnit && col.volumeUnit !== unit) {
-        volume = convertVolume(volume, col.volumeUnit, unit);
-      }
-      totalSapCollected += volume;
-    }
+    // Total sap collected (stored in liters)
+    const totalSapCollected = collections.reduce((t, col) => t + (col.volume || 0), 0);
 
-    // Total sap processed (boiled)
+    // Total sap processed (boiled, stored in liters)
     const totalSapProcessed = boils.reduce((t, b) => t + (b.sapVolumeIn || 0), 0);
 
     // Total syrup produced
@@ -112,16 +105,15 @@ class StatsServiceClass {
       boilSessions,
       totalBoilTimeMinutes: Math.round(totalBoilTime),
       avgCollectionPerDay: Math.round(avgCollectionPerDay * 100) / 100,
-      unit,
       zoneCount: zones.length,
       collectionCount: collections.length,
     };
   }
 
   /**
-   * Get zone-level stats
+   * Get zone-level stats (volumes in liters)
    */
-  async getZoneStats(seasonId, unit = 'gallons') {
+  async getZoneStats(seasonId) {
     const [collections, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
       zoneRepository.findBySeasonId(seasonId),
@@ -131,15 +123,7 @@ class StatsServiceClass {
 
     for (const zone of zones) {
       const zoneCollections = collections.filter((c) => c.zoneId === zone.id);
-
-      let totalVolume = 0;
-      for (const col of zoneCollections) {
-        let volume = col.volume || 0;
-        if (col.volumeUnit && col.volumeUnit !== unit) {
-          volume = convertVolume(volume, col.volumeUnit, unit);
-        }
-        totalVolume += volume;
-      }
+      const totalVolume = zoneCollections.reduce((t, col) => t + (col.volume || 0), 0);
 
       const sapPerTap = zone.tapCount > 0 ? totalVolume / zone.tapCount : null;
 
