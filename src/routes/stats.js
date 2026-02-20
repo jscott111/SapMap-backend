@@ -105,4 +105,50 @@ export const statsRoutes = async (fastify) => {
 
     return { correlation };
   });
+
+  /**
+   * Get flow predictions for the next 7 days (learned from temperature history vs volume)
+   */
+  fastify.get('/flow-predictions', async (request, reply) => {
+    const { seasonId, lat, lng } = request.query;
+
+    let targetSeasonId = seasonId;
+    let season;
+
+    if (!targetSeasonId) {
+      season = await seasonRepository.findActiveSeason(request.user.id);
+      if (!season) {
+        return reply.code(404).send({ error: 'No active season' });
+      }
+      targetSeasonId = season.id;
+    } else {
+      season = await seasonRepository.findById(seasonId);
+      if (!season || season.userId !== request.user.id) {
+        return reply.code(404).send({ error: 'Season not found' });
+      }
+    }
+
+    let latitude = parseFloat(lat);
+    let longitude = parseFloat(lng);
+
+    if (!latitude || !longitude) {
+      if (!season.location?.lat) {
+        return reply.code(400).send({
+          error: 'No location specified. Provide lat/lng or set a location on your season.',
+        });
+      }
+      latitude = season.location.lat;
+      longitude = season.location.lng;
+    }
+
+    const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
+    const result = await statsService.getFlowPredictions(
+      targetSeasonId,
+      latitude,
+      longitude,
+      temperatureUnit
+    );
+
+    return result;
+  });
 };
