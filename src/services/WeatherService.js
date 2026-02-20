@@ -6,9 +6,10 @@
 import { weatherCacheRepository } from '../storage/repositories/WeatherCacheRepository.js';
 
 const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1';
+const OPEN_METEO_ARCHIVE_BASE = 'https://archive-api.open-meteo.com/v1';
 
 /**
- * Fetch weather data from Open-Meteo API
+ * Fetch weather data from Open-Meteo Forecast API (for recent/future data)
  */
 async function fetchFromOpenMeteo(lat, lng, options = {}) {
   const {
@@ -23,15 +24,25 @@ async function fetchFromOpenMeteo(lat, lng, options = {}) {
       'temperature_2m_max',
       'temperature_2m_min',
       'precipitation_sum',
+      'precipitation_hours',
       'weathercode',
       'sunrise',
       'sunset',
+      'windspeed_10m_max',
+      'winddirection_10m_dominant',
+      'shortwave_radiation_sum',
+      'sunshine_duration',
+    ].join(','),
+    hourly: [
+      'relativehumidity_2m',
+      'surface_pressure',
     ].join(','),
     past_days: pastDays,
     forecast_days: forecastDays,
     timezone: 'auto',
     temperature_unit: 'fahrenheit',
     precipitation_unit: 'inch',
+    windspeed_unit: 'mph',
   });
 
   const response = await fetch(`${OPEN_METEO_BASE}/forecast?${params}`);
@@ -44,22 +55,112 @@ async function fetchFromOpenMeteo(lat, lng, options = {}) {
 }
 
 /**
+ * Fetch historical weather data from Open-Meteo Archive API
+ * Used for dates older than ~90 days
+ */
+async function fetchFromArchive(lat, lng, startDate, endDate) {
+  const params = new URLSearchParams({
+    latitude: lat,
+    longitude: lng,
+    start_date: startDate,
+    end_date: endDate,
+    daily: [
+      'temperature_2m_max',
+      'temperature_2m_min',
+      'precipitation_sum',
+      'precipitation_hours',
+      'weathercode',
+      'sunrise',
+      'sunset',
+      'windspeed_10m_max',
+      'winddirection_10m_dominant',
+      'shortwave_radiation_sum',
+      'sunshine_duration',
+    ].join(','),
+    hourly: [
+      'relativehumidity_2m',
+      'surface_pressure',
+    ].join(','),
+    timezone: 'auto',
+    temperature_unit: 'fahrenheit',
+    precipitation_unit: 'inch',
+    windspeed_unit: 'mph',
+  });
+
+  let response = await fetch(`${OPEN_METEO_ARCHIVE_BASE}/archive?${params}`);
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      await new Promise((r) => setTimeout(r, 2500));
+      response = await fetch(`${OPEN_METEO_ARCHIVE_BASE}/archive?${params}`);
+    }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Archive API error: ${response.status} - ${errorText}`);
+      throw new Error(`Archive Weather API error: ${response.status}`);
+    }
+  }
+
+  return response.json();
+}
+
+/**
+ * Calculate daily averages from hourly data for a specific day index
+ */
+function calculateHourlyAverages(hourly, dayIndex) {
+  const startHour = dayIndex * 24;
+  const endHour = startHour + 24;
+  
+  let humiditySum = 0;
+  let humidityCount = 0;
+  let pressureSum = 0;
+  let pressureCount = 0;
+  
+  for (let h = startHour; h < endHour && h < hourly.time.length; h++) {
+    if (hourly.relativehumidity_2m && hourly.relativehumidity_2m[h] != null) {
+      humiditySum += hourly.relativehumidity_2m[h];
+      humidityCount++;
+    }
+    if (hourly.surface_pressure && hourly.surface_pressure[h] != null) {
+      pressureSum += hourly.surface_pressure[h];
+      pressureCount++;
+    }
+  }
+  
+  return {
+    humidityAvg: humidityCount > 0 ? Math.round(humiditySum / humidityCount) : null,
+    pressureAvg: pressureCount > 0 ? Math.round((pressureSum / pressureCount) * 10) / 10 : null,
+  };
+}
+
+/**
  * Parse Open-Meteo response into daily records
  */
 function parseWeatherResponse(data) {
-  const { daily, timezone } = data;
+  const { daily, hourly, timezone } = data;
   const days = [];
 
   for (let i = 0; i < daily.time.length; i++) {
+    const hourlyAvgs = hourly ? calculateHourlyAverages(hourly, i) : { humidityAvg: null, pressureAvg: null };
+    
     days.push({
       date: daily.time[i],
       tempHigh: daily.temperature_2m_max[i],
       tempLow: daily.temperature_2m_min[i],
       tempAvg: (daily.temperature_2m_max[i] + daily.temperature_2m_min[i]) / 2,
       precipitation: daily.precipitation_sum[i],
+      precipitationHours: daily.precipitation_hours?.[i] ?? null,
       weatherCode: daily.weathercode[i],
       sunrise: daily.sunrise[i],
       sunset: daily.sunset[i],
+      windSpeed: daily.windspeed_10m_max?.[i] ?? null,
+      windDirection: daily.winddirection_10m_dominant?.[i] ?? null,
+      solarRadiation: daily.shortwave_radiation_sum?.[i] ?? null,
+      sunshineHours: daily.sunshine_duration?.[i] != null 
+        ? Math.round((daily.sunshine_duration[i] / 3600) * 10) / 10 
+        : null,
+      humidity: hourlyAvgs.humidityAvg,
+      pressure: hourlyAvgs.pressureAvg,
       timezone,
     });
   }
@@ -156,6 +257,7 @@ class WeatherServiceClass {
 
   /**
    * Get weather for a date range
+   * Uses archive API for historical dates (older than 30 days)
    * @param {string} [temperatureUnit] - 'fahrenheit' or 'celsius'
    */
   async getWeatherRange(lat, lng, startDate, endDate, temperatureUnit = 'fahrenheit') {
@@ -177,21 +279,55 @@ class WeatherServiceClass {
 
     let result;
     if (missingDates.length > 0) {
-      const data = await fetchFromOpenMeteo(lat, lng, {
-        pastDays: 30,
-        forecastDays: 7,
-      });
-
-      const days = parseWeatherResponse(data);
-
-      for (const day of days) {
-        await weatherCacheRepository.cache(lat, lng, day.date, day);
-      }
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
       const allDays = [...cached];
-      for (const day of days) {
-        if (!cachedDates.has(day.date)) {
-          allDays.push(day);
+
+      const historicalMissing = missingDates.filter(d => d < thirtyDaysAgoStr);
+      const recentMissing = missingDates.filter(d => d >= thirtyDaysAgoStr);
+
+      if (historicalMissing.length > 0) {
+        const archiveStart = historicalMissing.reduce((a, b) => a < b ? a : b);
+        const archiveEnd = historicalMissing.reduce((a, b) => a > b ? a : b);
+        
+        try {
+          const archiveData = await fetchFromArchive(lat, lng, archiveStart, archiveEnd);
+          const archiveDays = parseWeatherResponse(archiveData);
+
+          for (const day of archiveDays) {
+            await weatherCacheRepository.cache(lat, lng, day.date, day);
+            if (!cachedDates.has(day.date)) {
+              allDays.push(day);
+              cachedDates.add(day.date);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch archive weather data:', err.message);
+        }
+      }
+
+      if (recentMissing.length > 0) {
+        try {
+          const data = await fetchFromOpenMeteo(lat, lng, {
+            pastDays: 30,
+            forecastDays: 7,
+          });
+
+          const days = parseWeatherResponse(data);
+
+          for (const day of days) {
+            await weatherCacheRepository.cache(lat, lng, day.date, day);
+            if (!cachedDates.has(day.date)) {
+              allDays.push(day);
+              cachedDates.add(day.date);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch forecast weather data:', err.message);
         }
       }
 

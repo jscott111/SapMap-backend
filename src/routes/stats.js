@@ -107,6 +107,134 @@ export const statsRoutes = async (fastify) => {
   });
 
   /**
+   * Get weather analytics: detailed correlation + flow predictions in one request (one backend fetch for correlation)
+   */
+  fastify.get('/weather-analytics', async (request, reply) => {
+    const { seasonId, lat, lng } = request.query;
+
+    let targetSeasonId = seasonId;
+    let season;
+
+    if (!targetSeasonId) {
+      season = await seasonRepository.findActiveSeason(request.user.id);
+      if (!season) {
+        return reply.code(404).send({ error: 'No active season' });
+      }
+      targetSeasonId = season.id;
+    } else {
+      season = await seasonRepository.findById(seasonId);
+      if (!season || season.userId !== request.user.id) {
+        return reply.code(404).send({ error: 'Season not found' });
+      }
+    }
+
+    let latitude = parseFloat(lat);
+    let longitude = parseFloat(lng);
+
+    if (!latitude || !longitude) {
+      if (!season.location?.lat) {
+        return reply.code(400).send({
+          error: 'No location specified. Provide lat/lng or set a location on your season.',
+        });
+      }
+      latitude = season.location.lat;
+      longitude = season.location.lng;
+    }
+
+    const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
+    const detailedCorrelation = await statsService.getDetailedWeatherCorrelation(
+      targetSeasonId,
+      latitude,
+      longitude,
+      temperatureUnit
+    );
+
+    let flowPredictions;
+    try {
+      flowPredictions = await statsService.getFlowPredictions(
+        targetSeasonId,
+        latitude,
+        longitude,
+        temperatureUnit,
+        detailedCorrelation
+      );
+    } catch (err) {
+      fastify.log.warn({ err }, 'Flow predictions failed, returning insufficientData');
+      flowPredictions = {
+        predictions: [],
+        insufficientData: true,
+        totalDays: detailedCorrelation.data?.length ?? 0,
+      };
+    }
+
+    let conventionalPredictions;
+    try {
+      conventionalPredictions = await statsService.getTraditionalFlowPredictions(
+        targetSeasonId,
+        latitude,
+        longitude,
+        temperatureUnit,
+        detailedCorrelation
+      );
+    } catch (err) {
+      fastify.log.warn({ err }, 'Conventional predictions failed');
+      conventionalPredictions = {
+        predictions: [],
+        insufficientData: true,
+        totalDays: detailedCorrelation.data?.length ?? 0,
+      };
+    }
+
+    return { detailedCorrelation, flowPredictions, conventionalPredictions };
+  });
+
+  /**
+   * Get detailed weather correlation analysis with all weather factors
+   */
+  fastify.get('/detailed-weather-correlation', async (request, reply) => {
+    const { seasonId, lat, lng } = request.query;
+
+    let targetSeasonId = seasonId;
+    let season;
+
+    if (!targetSeasonId) {
+      season = await seasonRepository.findActiveSeason(request.user.id);
+      if (!season) {
+        return reply.code(404).send({ error: 'No active season' });
+      }
+      targetSeasonId = season.id;
+    } else {
+      season = await seasonRepository.findById(seasonId);
+      if (!season || season.userId !== request.user.id) {
+        return reply.code(404).send({ error: 'Season not found' });
+      }
+    }
+
+    let latitude = parseFloat(lat);
+    let longitude = parseFloat(lng);
+
+    if (!latitude || !longitude) {
+      if (!season.location?.lat) {
+        return reply.code(400).send({
+          error: 'No location specified. Provide lat/lng or set a location on your season.',
+        });
+      }
+      latitude = season.location.lat;
+      longitude = season.location.lng;
+    }
+
+    const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
+    const result = await statsService.getDetailedWeatherCorrelation(
+      targetSeasonId,
+      latitude,
+      longitude,
+      temperatureUnit
+    );
+
+    return result;
+  });
+
+  /**
    * Get flow predictions for the next 7 days (learned from temperature history vs volume)
    */
   fastify.get('/flow-predictions', async (request, reply) => {
