@@ -5,8 +5,23 @@
 import { collectionRepository } from '../storage/repositories/CollectionRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
+import { userRepository } from '../storage/repositories/UserRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
+
+/** Enrich collections with creator display info (id, name) */
+async function enrichWithCreatedBy(collections) {
+  const userIds = [...new Set(collections.map((c) => c.userId).filter(Boolean))];
+  if (userIds.length === 0) return collections.map((c) => ({ ...c, createdBy: null }));
+  const users = await Promise.all(userIds.map((id) => userRepository.findById(id)));
+  const userMap = Object.fromEntries(userIds.map((id, i) => [id, users[i]]));
+  return collections.map((c) => ({
+    ...c,
+    createdBy: c.userId
+      ? { id: c.userId, name: userMap[c.userId]?.name ?? 'Unknown' }
+      : null,
+  }));
+}
 
 /** Zone belongs to the same org as the season, or (legacy) zone is scoped to this season */
 function zoneBelongsToSeason(zone, season) {
@@ -63,7 +78,8 @@ export const collectionRoutes = async (fastify) => {
     } else {
       collections = await collectionRepository.findBySeasonId(targetSeasonId);
     }
-    return { collections };
+    const enriched = await enrichWithCreatedBy(collections);
+    return { collections: enriched };
   });
 
   /**
@@ -100,7 +116,8 @@ export const collectionRoutes = async (fastify) => {
     if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Collection not found' });
     }
-    return { collection };
+    const [enriched] = await enrichWithCreatedBy([collection]);
+    return { collection: enriched };
   });
 
   /**

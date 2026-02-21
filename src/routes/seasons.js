@@ -94,11 +94,11 @@ export const seasonRoutes = async (fastify) => {
   });
 
   /**
-   * Set a season as active
+   * Set a season as active (requires write; read-only users cannot change active season)
    */
   fastify.post('/:id/activate', async (request, reply) => {
     const season = await seasonRepository.findById(request.params.id);
-    if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Season not found' });
     }
     try {
