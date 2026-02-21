@@ -7,6 +7,48 @@ import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { weatherService, isSapFlowIdeal } from './WeatherService.js';
 
+/** Peak flow per tap per day (liters) under ideal freeze-thaw conditions. ~1.5 gal/tap/day from research. */
+const DEFAULT_LITERS_PER_TAP_PER_DAY = 5.68;
+
+function prevDateStr(dateStr, offset) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() - offset);
+  return d.toISOString().split('T')[0];
+}
+
+/**
+ * Research-based flow per tap per day (liters) from freeze-thaw cycle.
+ * Uses: today must be ideal (freeze-thaw); previous 1–2 nights' freezes improve recharge; thaw strength scales flow.
+ */
+function researchBasedFlowPerTap(day, prev1, prev2, temperatureUnit) {
+  const isF = temperatureUnit !== 'celsius';
+  const freezeThresh = isF ? 32 : 0;
+  const thawThresh = isF ? 40 : 4.4;
+  const tempHigh = day.tempHigh ?? 0;
+  const tempLow = day.tempLow ?? 0;
+  if (!isSapFlowIdeal(tempHigh, tempLow, temperatureUnit)) return 0;
+
+  const thawRange = isF ? 25 : 14;
+  const thawStrength = Math.min(1, Math.max(0, (tempHigh - thawThresh) / thawRange));
+
+  let prevNightFactor = 0.8;
+  if (prev1) {
+    const pl = prev1.tempLow ?? 0;
+    if (pl < freezeThresh) {
+      const coldRange = isF ? 20 : 11;
+      prevNightFactor = 0.5 + 0.5 * Math.min(1, (freezeThresh - pl) / coldRange);
+    } else {
+      prevNightFactor = 0.3;
+    }
+  }
+
+  let prev2Factor = 1.0;
+  if (prev2 && (prev2.tempLow ?? 0) >= freezeThresh) prev2Factor = 0.9;
+
+  const flowPerTap = DEFAULT_LITERS_PER_TAP_PER_DAY * thawStrength * prevNightFactor * prev2Factor;
+  return Math.round(flowPerTap * 100) / 100;
+}
+
 /**
  * Calculate the "Rule of 86" - estimate syrup yield from Brix reading
  * Formula: gallons of sap needed = 86 / Brix
@@ -790,9 +832,10 @@ class StatsServiceClass {
   }
 
   /**
-   * Generate conventional flow estimates: which days are ideal is determined only by the
-   * freeze-thaw rule (cold nights + warm days). On ideal days, estimated volume uses your
-   * average collection on ideal days; on non-ideal days, 0.
+   * Generate conventional flow estimates: which days are ideal is determined by the
+   * freeze-thaw rule (cold nights + warm days). Volume on ideal days uses your average
+   * collection on ideal days when available; otherwise a research-based flow/tap × taps
+   * from the previous couple days' freeze-thaw cycle.
    */
   async getTraditionalFlowPredictions(seasonId, lat, lng, temperatureUnit = 'fahrenheit', precomputedCorrelation = null) {
     const detailedCorr = precomputedCorrelation ?? await this.getDetailedWeatherCorrelation(seasonId, lat, lng, temperatureUnit);
@@ -806,6 +849,21 @@ class StatsServiceClass {
       : null;
 
     const forecast = await weatherService.getForecast(lat, lng, temperatureUnit);
+    const weatherByDate = new Map(forecast.map((d) => [d.date, d]));
+
+    if (forecast.length > 0) {
+      const firstDate = forecast[0].date;
+      const rangeStart = prevDateStr(firstDate, 2);
+      const rangeEnd = prevDateStr(firstDate, 1);
+      try {
+        const priorDays = await weatherService.getWeatherRange(lat, lng, rangeStart, rangeEnd, temperatureUnit);
+        for (const d of priorDays) {
+          weatherByDate.set(d.date, d);
+        }
+      } catch (err) {
+        // Proceed without prior days; research-based flow will use default prev factors
+      }
+    }
 
     const predictions = forecast.map((day) => {
       const tempHigh = day.tempHigh ?? 0;
@@ -813,8 +871,17 @@ class StatsServiceClass {
       const idealForSap = isSapFlowIdeal(tempHigh, tempLow, temperatureUnit);
 
       let predictedVolume = 0;
-      if (idealForSap && avgIdealVolume != null) {
-        predictedVolume = Math.round(avgIdealVolume * 100) / 100;
+      if (idealForSap) {
+        if (avgIdealVolume != null) {
+          predictedVolume = Math.round(avgIdealVolume * 100) / 100;
+        } else {
+          const prev1 = weatherByDate.get(prevDateStr(day.date, 1)) ?? null;
+          const prev2 = weatherByDate.get(prevDateStr(day.date, 2)) ?? null;
+          const flowPerTap = researchBasedFlowPerTap(day, prev1, prev2, temperatureUnit);
+          predictedVolume = totalTaps > 0
+            ? Math.round(flowPerTap * totalTaps * 100) / 100
+            : 0;
+        }
       }
 
       return {
@@ -827,13 +894,16 @@ class StatsServiceClass {
       };
     });
 
+    const useResearchBased = avgIdealVolume == null;
     return {
       predictions,
       method: 'traditional',
-      description: 'Ideal vs non-ideal from the freeze-thaw rule (cold nights + warm days). Volume on ideal days uses your average collection on ideal days.',
+      description: useResearchBased
+        ? 'Ideal vs non-ideal from the freeze-thaw rule. Volume = research-based flow per tap (from previous nights\' freezes and thaw strength) × number of taps.'
+        : 'Ideal vs non-ideal from the freeze-thaw rule (cold nights + warm days). Volume on ideal days uses your average collection on ideal days.',
       totalDays: data.length,
       totalTaps: totalTaps || null,
-      insufficientData: predictions.length === 0 || avgIdealVolume == null,
+      insufficientData: predictions.length === 0,
     };
   }
 }
