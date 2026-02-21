@@ -5,27 +5,31 @@
 import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
 
 export const boilRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', async (request) => {
+    request.memberships = await getMembershipsForUser(request.user.id);
+  });
 
   /**
    * Get all boils for a season
    */
   fastify.get('/', async (request, reply) => {
     const seasonId = request.query.seasonId;
-
     let targetSeasonId = seasonId;
 
     if (!targetSeasonId) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason) {
-        return { boils: [] };
-      }
+      const activeSeason = await seasonRepository.findActiveSeason(
+        request.user.id,
+        request.memberships
+      );
+      if (!activeSeason) return { boils: [] };
       targetSeasonId = activeSeason.id;
     } else {
       const season = await seasonRepository.findById(seasonId);
-      if (!season || season.userId !== request.user.id) {
+      if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
         return reply.code(404).send({ error: 'Season not found' });
       }
     }
@@ -35,15 +39,15 @@ export const boilRoutes = async (fastify) => {
   });
 
   /**
-   * Get a specific boil
+   * Get a specific boil (access via season)
    */
   fastify.get('/:id', async (request, reply) => {
     const boil = await boilRepository.findById(request.params.id);
-
-    if (!boil || boil.userId !== request.user.id) {
+    if (!boil) return reply.code(404).send({ error: 'Boil not found' });
+    const season = await seasonRepository.findById(boil.seasonId);
+    if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Boil not found' });
     }
-
     return { boil };
   });
 
@@ -62,27 +66,28 @@ export const boilRoutes = async (fastify) => {
       notes,
     } = request.body;
 
-    // Get season (use provided or active)
     let targetSeasonId = seasonId;
     if (!targetSeasonId) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
+      const activeSeason = await seasonRepository.findActiveSeason(
+        request.user.id,
+        request.memberships
+      );
       if (!activeSeason) {
         return reply.code(400).send({ error: 'No active season. Create a season first.' });
       }
       targetSeasonId = activeSeason.id;
     } else {
       const season = await seasonRepository.findById(seasonId);
-      if (!season || season.userId !== request.user.id) {
+      if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
         return reply.code(404).send({ error: 'Season not found' });
       }
     }
 
-    // Calculate duration if start/end times provided
     let calculatedDuration = duration;
     if (startTime && endTime && !duration) {
       const start = new Date(`1970-01-01T${startTime}`);
       const end = new Date(`1970-01-01T${endTime}`);
-      calculatedDuration = (end - start) / 1000 / 60; // minutes
+      calculatedDuration = (end - start) / 1000 / 60;
     }
 
     const boil = await boilRepository.create({
@@ -96,7 +101,6 @@ export const boilRoutes = async (fastify) => {
       duration: calculatedDuration,
       notes,
     });
-
     return { boil };
   });
 
@@ -105,11 +109,11 @@ export const boilRoutes = async (fastify) => {
    */
   fastify.patch('/:id', async (request, reply) => {
     const boil = await boilRepository.findById(request.params.id);
-
-    if (!boil || boil.userId !== request.user.id) {
+    if (!boil) return reply.code(404).send({ error: 'Boil not found' });
+    const season = await seasonRepository.findById(boil.seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Boil not found' });
     }
-
     const updated = await boilRepository.update(request.params.id, request.body);
     return { boil: updated };
   });
@@ -119,11 +123,11 @@ export const boilRoutes = async (fastify) => {
    */
   fastify.delete('/:id', async (request, reply) => {
     const boil = await boilRepository.findById(request.params.id);
-
-    if (!boil || boil.userId !== request.user.id) {
+    if (!boil) return reply.code(404).send({ error: 'Boil not found' });
+    const season = await seasonRepository.findById(boil.seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Boil not found' });
     }
-
     await boilRepository.delete(request.params.id);
     return { success: true };
   });

@@ -6,35 +6,53 @@ import { collectionRepository } from '../storage/repositories/CollectionReposito
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { authenticate } from '../middleware/auth.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
+
+/** Zone belongs to the same org as the season, or (legacy) zone is scoped to this season */
+function zoneBelongsToSeason(zone, season) {
+  if (zone.organizationId && season.organizationId) {
+    return zone.organizationId === season.organizationId;
+  }
+  return zone.seasonId === season.id;
+}
 
 export const collectionRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', async (request) => {
+    request.memberships = await getMembershipsForUser(request.user.id);
+  });
 
   /**
    * Get all collections for a season
    */
   fastify.get('/', async (request, reply) => {
     const { seasonId, zoneId, startDate, endDate } = request.query;
-
     let targetSeasonId = seasonId;
 
     if (!targetSeasonId) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason) {
-        return { collections: [] };
-      }
+      const activeSeason = await seasonRepository.findActiveSeason(
+        request.user.id,
+        request.memberships
+      );
+      if (!activeSeason) return { collections: [] };
       targetSeasonId = activeSeason.id;
     } else {
-      // Verify user owns this season
       const season = await seasonRepository.findById(seasonId);
-      if (!season || season.userId !== request.user.id) {
+      if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
         return reply.code(404).send({ error: 'Season not found' });
       }
     }
 
     let collections;
-
     if (zoneId) {
+      const [zone, season] = await Promise.all([
+        zoneRepository.findById(zoneId),
+        seasonRepository.findById(targetSeasonId),
+      ]);
+      if (!zone) return reply.code(404).send({ error: 'Zone not found' });
+      if (!season || !zoneBelongsToSeason(zone, season)) {
+        return reply.code(404).send({ error: 'Zone not found' });
+      }
       collections = await collectionRepository.findByZoneId(zoneId);
     } else if (startDate && endDate) {
       collections = await collectionRepository.findByDateRange(
@@ -45,7 +63,6 @@ export const collectionRoutes = async (fastify) => {
     } else {
       collections = await collectionRepository.findBySeasonId(targetSeasonId);
     }
-
     return { collections };
   });
 
@@ -54,31 +71,35 @@ export const collectionRoutes = async (fastify) => {
    */
   fastify.get('/daily', async (request, reply) => {
     const seasonId = request.query.seasonId;
-
     let targetSeasonId = seasonId;
 
     if (!targetSeasonId) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason) {
-        return { dailyTotals: [] };
-      }
+      const activeSeason = await seasonRepository.findActiveSeason(
+        request.user.id,
+        request.memberships
+      );
+      if (!activeSeason) return { dailyTotals: [] };
       targetSeasonId = activeSeason.id;
+    } else {
+      const season = await seasonRepository.findById(seasonId);
+      if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
+        return reply.code(404).send({ error: 'Season not found' });
+      }
     }
-
     const dailyTotals = await collectionRepository.getDailyTotals(targetSeasonId);
     return { dailyTotals };
   });
 
   /**
-   * Get a specific collection
+   * Get a specific collection (access via season)
    */
   fastify.get('/:id', async (request, reply) => {
     const collection = await collectionRepository.findById(request.params.id);
-
-    if (!collection || collection.userId !== request.user.id) {
+    if (!collection) return reply.code(404).send({ error: 'Collection not found' });
+    const season = await seasonRepository.findById(collection.seasonId);
+    if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Collection not found' });
     }
-
     return { collection };
   });
 
@@ -98,25 +119,29 @@ export const collectionRoutes = async (fastify) => {
       weatherData,
     } = request.body;
 
-    // Get season (use provided or active)
     let targetSeasonId = seasonId;
+    let season;
     if (!targetSeasonId) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
+      const activeSeason = await seasonRepository.findActiveSeason(
+        request.user.id,
+        request.memberships
+      );
       if (!activeSeason) {
         return reply.code(400).send({ error: 'No active season. Create a season first.' });
       }
       targetSeasonId = activeSeason.id;
+      season = activeSeason;
     } else {
-      const season = await seasonRepository.findById(seasonId);
-      if (!season || season.userId !== request.user.id) {
+      season = await seasonRepository.findById(seasonId);
+      if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
         return reply.code(404).send({ error: 'Season not found' });
       }
     }
 
-    // Verify zone if provided
     if (zoneId) {
       const zone = await zoneRepository.findById(zoneId);
-      if (!zone || zone.userId !== request.user.id) {
+      if (!zone) return reply.code(404).send({ error: 'Zone not found' });
+      if (!zoneBelongsToSeason(zone, season)) {
         return reply.code(404).send({ error: 'Zone not found' });
       }
     }
@@ -132,7 +157,6 @@ export const collectionRoutes = async (fastify) => {
       temperature,
       weatherData,
     });
-
     return { collection };
   });
 
@@ -141,12 +165,23 @@ export const collectionRoutes = async (fastify) => {
    */
   fastify.patch('/:id', async (request, reply) => {
     const collection = await collectionRepository.findById(request.params.id);
-
-    if (!collection || collection.userId !== request.user.id) {
+    if (!collection) return reply.code(404).send({ error: 'Collection not found' });
+    const season = await seasonRepository.findById(collection.seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Collection not found' });
     }
-
-    const { volumeUnit: _dropped, ...body } = request.body;
+    const { volumeUnit: _dropped, zoneId: patchZoneId, ...body } = request.body;
+    if (patchZoneId !== undefined) {
+      if (patchZoneId) {
+        const zone = await zoneRepository.findById(patchZoneId);
+        if (!zone || !zoneBelongsToSeason(zone, season)) {
+          return reply.code(400).send({ error: 'Zone not found or does not belong to this season\'s organization' });
+        }
+        body.zoneId = patchZoneId;
+      } else {
+        body.zoneId = null;
+      }
+    }
     const updated = await collectionRepository.update(request.params.id, body);
     return { collection: updated };
   });
@@ -156,11 +191,11 @@ export const collectionRoutes = async (fastify) => {
    */
   fastify.delete('/:id', async (request, reply) => {
     const collection = await collectionRepository.findById(request.params.id);
-
-    if (!collection || collection.userId !== request.user.id) {
+    if (!collection) return reply.code(404).send({ error: 'Collection not found' });
+    const season = await seasonRepository.findById(collection.seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Collection not found' });
     }
-
     await collectionRepository.delete(request.params.id);
     return { success: true };
   });

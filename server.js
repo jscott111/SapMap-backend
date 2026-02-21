@@ -18,6 +18,8 @@ import { collectionRoutes } from './src/routes/collections.js';
 import { boilRoutes } from './src/routes/boils.js';
 import { weatherRoutes } from './src/routes/weather.js';
 import { statsRoutes } from './src/routes/stats.js';
+import { organizationRoutes } from './src/routes/organizations.js';
+import { inviteRoutes } from './src/routes/invites.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -95,6 +97,8 @@ const start = async () => {
     await fastify.register(boilRoutes, { prefix: '/api/boils' });
     await fastify.register(weatherRoutes, { prefix: '/api/weather' });
     await fastify.register(statsRoutes, { prefix: '/api/stats' });
+    await fastify.register(organizationRoutes, { prefix: '/api/organizations' });
+    await fastify.register(inviteRoutes, { prefix: '/api/invites' });
 
     const port = process.env.PORT || 3001;
     const host = process.env.HOST || '0.0.0.0';

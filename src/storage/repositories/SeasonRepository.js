@@ -11,37 +11,63 @@ class SeasonRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Find all seasons for a user
+   * Find all seasons for a user (personal only)
    */
   async findByUserId(userId) {
     const seasons = await this.findBy('userId', userId);
-    return seasons.sort((a, b) => b.year - a.year);
+    return seasons.sort((a, b) => (b.year || 0) - (a.year || 0));
   }
 
   /**
-   * Find the active season for a user
+   * Find all seasons for an organization
    */
-  async findActiveSeason(userId) {
-    const seasons = await this.findByConditions([
-      { field: 'userId', value: userId },
-      { field: 'isActive', value: true },
-    ]);
-    return seasons[0] || null;
+  async findByOrganizationId(organizationId) {
+    const seasons = await this.findBy('organizationId', organizationId);
+    return seasons.sort((a, b) => (b.year || 0) - (a.year || 0));
   }
 
   /**
-   * Set a season as active (deactivates others)
+   * Find all seasons accessible to user (personal + org memberships)
    */
-  async setActive(seasonId, userId) {
-    // Deactivate all other seasons for this user
-    const seasons = await this.findByUserId(userId);
+  async findAccessibleByUser(userId, memberships = []) {
+    const personal = await this.findByUserId(userId);
+    const orgIds = [...new Set((memberships || []).map((m) => m.organizationId))];
+    let orgSeasons = [];
+    for (const orgId of orgIds) {
+      const list = await this.findByOrganizationId(orgId);
+      orgSeasons = orgSeasons.concat(list);
+    }
+    const byId = new Map();
+    for (const s of [...personal, ...orgSeasons]) {
+      if (!byId.has(s.id)) byId.set(s.id, s);
+    }
+    return [...byId.values()].sort((a, b) => (b.year || 0) - (a.year || 0));
+  }
+
+  /**
+   * Find the active season for a user (among accessible seasons)
+   */
+  async findActiveSeason(userId, memberships = []) {
+    const seasons = await this.findAccessibleByUser(userId, memberships);
+    return seasons.find((s) => s.isActive) || null;
+  }
+
+  /**
+   * Set a season as active (deactivates other accessible seasons for this user)
+   */
+  async setActive(seasonId, userId, memberships = []) {
+    const seasons = await this.findAccessibleByUser(userId, memberships);
+    const canActivate = seasons.some((s) => s.id === seasonId);
+    if (!canActivate) {
+      const err = new Error('Season not found or access denied');
+      err.statusCode = 404;
+      throw err;
+    }
     for (const season of seasons) {
       if (season.id !== seasonId && season.isActive) {
         await this.update(season.id, { isActive: false });
       }
     }
-
-    // Activate the specified season
     return this.update(seasonId, { isActive: true });
   }
 

@@ -4,31 +4,67 @@
 
 import { weatherService, getConditionsFromCode, isSapFlowIdeal } from '../services/WeatherService.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
+import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { authenticate } from '../middleware/auth.js';
+import { getMembershipsForUser, hasOrgRole } from '../lib/orgAccess.js';
+
+async function resolveLocation(request, reply) {
+  const { lat, lng, zoneId } = request.query || {};
+
+  if (zoneId) {
+    const zone = await zoneRepository.findById(zoneId);
+    if (!zone) return reply.code(404).send({ error: 'Zone not found' });
+    const orgId = zone.organizationId;
+    if (orgId && !hasOrgRole(request.memberships, orgId, 'read')) {
+      return reply.code(404).send({ error: 'Zone not found' });
+    }
+    if (!zone.seasonId && !orgId && zone.userId !== request.user.id) {
+      return reply.code(404).send({ error: 'Zone not found' });
+    }
+    if (!zone.location?.lat || zone.location?.lng == null) {
+      return reply.code(400).send({
+        error: 'This sugar bush has no location set. Set a location in Settings.',
+      });
+    }
+    return { latitude: zone.location.lat, longitude: zone.location.lng };
+  }
+
+  let latitude = parseFloat(lat);
+  let longitude = parseFloat(lng);
+
+  if (latitude && longitude && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+    return { latitude, longitude };
+  }
+
+  const activeSeason = await seasonRepository.findActiveSeason(
+    request.user.id,
+    request.memberships
+  );
+  if (activeSeason?.location?.lat != null && activeSeason?.location?.lng != null) {
+    return {
+      latitude: activeSeason.location.lat,
+      longitude: activeSeason.location.lng,
+    };
+  }
+
+  return reply.code(400).send({
+    error: 'No location specified. Provide zoneId or lat/lng, or set a location on a sugar bush in Settings.',
+  });
+}
 
 export const weatherRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', async (request) => {
+    request.memberships = await getMembershipsForUser(request.user.id);
+  });
 
   /**
-   * Get weather forecast for the active season's location
+   * Get weather forecast (location from zoneId, lat/lng, or active season)
    */
   fastify.get('/forecast', async (request, reply) => {
-    const { lat, lng } = request.query;
-
-    let latitude = parseFloat(lat);
-    let longitude = parseFloat(lng);
-
-    // If no coordinates provided, use active season's location
-    if (!latitude || !longitude) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason?.location?.lat) {
-        return reply.code(400).send({
-          error: 'No location specified. Provide lat/lng or set a location on your active season.',
-        });
-      }
-      latitude = activeSeason.location.lat;
-      longitude = activeSeason.location.lng;
-    }
+    const resolved = await resolveLocation(request, reply);
+    if (resolved.latitude == null || resolved.longitude == null) return resolved;
+    const { latitude, longitude } = resolved;
 
     const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
     const forecast = await weatherService.getForecast(latitude, longitude, temperatureUnit);
@@ -40,21 +76,9 @@ export const weatherRoutes = async (fastify) => {
    */
   fastify.get('/date/:date', async (request, reply) => {
     const { date } = request.params;
-    const { lat, lng } = request.query;
-
-    let latitude = parseFloat(lat);
-    let longitude = parseFloat(lng);
-
-    if (!latitude || !longitude) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason?.location?.lat) {
-        return reply.code(400).send({
-          error: 'No location specified.',
-        });
-      }
-      latitude = activeSeason.location.lat;
-      longitude = activeSeason.location.lng;
-    }
+    const resolved = await resolveLocation(request, reply);
+    if (resolved.latitude == null || resolved.longitude == null) return resolved;
+    const { latitude, longitude } = resolved;
 
     const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
     const weather = await weatherService.getWeather(latitude, longitude, date, temperatureUnit);
@@ -76,25 +100,15 @@ export const weatherRoutes = async (fastify) => {
    * Get weather for a date range
    */
   fastify.get('/range', async (request, reply) => {
-    const { startDate, endDate, lat, lng } = request.query;
+    const { startDate, endDate } = request.query;
 
     if (!startDate || !endDate) {
       return reply.code(400).send({ error: 'startDate and endDate are required' });
     }
 
-    let latitude = parseFloat(lat);
-    let longitude = parseFloat(lng);
-
-    if (!latitude || !longitude) {
-      const activeSeason = await seasonRepository.findActiveSeason(request.user.id);
-      if (!activeSeason?.location?.lat) {
-        return reply.code(400).send({
-          error: 'No location specified.',
-        });
-      }
-      latitude = activeSeason.location.lat;
-      longitude = activeSeason.location.lng;
-    }
+    const resolved = await resolveLocation(request, reply);
+    if (resolved.latitude == null || resolved.longitude == null) return resolved;
+    const { latitude, longitude } = resolved;
 
     const temperatureUnit = request.user.preferences?.temperatureUnit || 'fahrenheit';
     const weatherData = await weatherService.getWeatherRange(

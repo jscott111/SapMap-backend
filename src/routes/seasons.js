@@ -4,24 +4,37 @@
 
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
 
 export const seasonRoutes = async (fastify) => {
-  // All routes require authentication
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', async (request) => {
+    request.memberships = await getMembershipsForUser(request.user.id);
+  });
 
   /**
-   * Get all seasons for the current user
+   * Get all seasons accessible to the current user (orgs only; no personal seasons)
    */
   fastify.get('/', async (request) => {
-    const seasons = await seasonRepository.findByUserId(request.user.id);
+    const all = await seasonRepository.findAccessibleByUser(
+      request.user.id,
+      request.memberships
+    );
+    const seasons = all.filter((s) => s.organizationId);
     return { seasons };
   });
 
   /**
-   * Get the active season
+   * Get the active season (among accessible org seasons only)
    */
   fastify.get('/active', async (request) => {
-    const season = await seasonRepository.findActiveSeason(request.user.id);
+    const season = await seasonRepository.findActiveSeason(
+      request.user.id,
+      request.memberships
+    );
+    if (!season || !season.organizationId) {
+      return { season: null };
+    }
     return { season };
   });
 
@@ -30,22 +43,32 @@ export const seasonRoutes = async (fastify) => {
    */
   fastify.get('/:id', async (request, reply) => {
     const season = await seasonRepository.findById(request.params.id);
-
-    if (!season || season.userId !== request.user.id) {
+    if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Season not found' });
     }
-
     return { season };
   });
 
   /**
-   * Create a new season
+   * Create a new season (organizationId required; requires write in that org)
    */
-  fastify.post('/', async (request) => {
-    const { name, year, startDate, endDate, location } = request.body;
+  fastify.post('/', async (request, reply) => {
+    const { name, year, startDate, endDate, location, organizationId } = request.body;
+
+    if (!organizationId) {
+      return reply.code(400).send({ error: 'Organization is required. Create or select an organization first.' });
+    }
+
+    const hasWrite = (request.memberships || []).some(
+      (m) => m.organizationId === organizationId && (m.role === 'write' || m.role === 'admin')
+    );
+    if (!hasWrite) {
+      return reply.code(403).send({ error: 'Write access required to create seasons in this organization' });
+    }
 
     const season = await seasonRepository.create({
       userId: request.user.id,
+      organizationId,
       name: name || `${year || new Date().getFullYear()} Season`,
       year: year || new Date().getFullYear(),
       startDate,
@@ -54,9 +77,7 @@ export const seasonRoutes = async (fastify) => {
       isActive: true,
     });
 
-    // Set this as active (deactivates others)
-    await seasonRepository.setActive(season.id, request.user.id);
-
+    await seasonRepository.setActive(season.id, request.user.id, request.memberships);
     return { season };
   });
 
@@ -65,11 +86,9 @@ export const seasonRoutes = async (fastify) => {
    */
   fastify.patch('/:id', async (request, reply) => {
     const season = await seasonRepository.findById(request.params.id);
-
-    if (!season || season.userId !== request.user.id) {
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Season not found' });
     }
-
     const updated = await seasonRepository.update(request.params.id, request.body);
     return { season: updated };
   });
@@ -79,13 +98,19 @@ export const seasonRoutes = async (fastify) => {
    */
   fastify.post('/:id/activate', async (request, reply) => {
     const season = await seasonRepository.findById(request.params.id);
-
-    if (!season || season.userId !== request.user.id) {
+    if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Season not found' });
     }
-
-    const updated = await seasonRepository.setActive(request.params.id, request.user.id);
-    return { season: updated };
+    try {
+      const updated = await seasonRepository.setActive(
+        request.params.id,
+        request.user.id,
+        request.memberships
+      );
+      return { season: updated };
+    } catch (err) {
+      return reply.code(err.statusCode || 500).send({ error: err.message });
+    }
   });
 
   /**
@@ -93,11 +118,9 @@ export const seasonRoutes = async (fastify) => {
    */
   fastify.delete('/:id', async (request, reply) => {
     const season = await seasonRepository.findById(request.params.id);
-
-    if (!season || season.userId !== request.user.id) {
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
       return reply.code(404).send({ error: 'Season not found' });
     }
-
     await seasonRepository.delete(request.params.id);
     return { success: true };
   });

@@ -104,6 +104,16 @@ API server for the SapMap maple sap production tracking application.
 - `GET /api/stats/zones` - Get zone-level stats
 - `GET /api/stats/weather-correlation` - Get weather correlation data
 
+### Invite emails (optional)
+
+When an org admin creates an invite, the backend can email the invite link to the recipient using [Resend](https://resend.com). If email is not configured, the invite is not created and the API returns an error (so the admin can fix config and try again).
+
+Set in `.env`:
+
+- **`RESEND_API_KEY`** – Your Resend API key (get one at [resend.com](https://resend.com)). If unset, no email is sent.
+- **`RESEND_FROM_EMAIL`** – Sender address. With Resend’s default testing setup you can only send to **your own email**. To send to other recipients, [verify a domain](https://resend.com/domains) in Resend and set this to an address on that domain (e.g. `invites@yourdomain.com`).
+- **`APP_URL`** – Base URL of the frontend (e.g. `https://app.sapmap.com` or `http://localhost:5173`) used to build the invite link in the email.
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -114,3 +124,6 @@ API server for the SapMap maple sap production tracking application.
 | `GOOGLE_CLOUD_PROJECT_ID` | GCP project ID | (required) |
 | `FIRESTORE_EMULATOR_HOST` | Emulator host | (optional) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account key | (optional) |
+| `RESEND_API_KEY` | Resend API key for invite emails | (optional) |
+| `RESEND_FROM_EMAIL` | From address for invite emails | `SapMap <onboarding@resend.dev>` |
+| `APP_URL` | Frontend base URL for invite links | `http://localhost:5173` |

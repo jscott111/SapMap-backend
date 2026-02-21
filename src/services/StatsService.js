@@ -5,7 +5,18 @@
 import { collectionRepository } from '../storage/repositories/CollectionRepository.js';
 import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
+import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { weatherService, isSapFlowIdeal } from './WeatherService.js';
+
+/** Get zones for a season: by season's org if set, else legacy by seasonId */
+async function getZonesForSeason(seasonId) {
+  const season = await seasonRepository.findById(seasonId);
+  if (!season) return [];
+  if (season.organizationId) {
+    return zoneRepository.findByOrganizationId(season.organizationId);
+  }
+  return zoneRepository.findBySeasonId(seasonId);
+}
 
 /** Peak flow per tap per day (liters) under ideal freeze-thaw conditions. ~1.5 gal/tap/day from research. */
 const DEFAULT_LITERS_PER_TAP_PER_DAY = 5.68;
@@ -94,7 +105,7 @@ class StatsServiceClass {
     const [collections, boils, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
       boilRepository.findBySeasonId(seasonId),
-      zoneRepository.findBySeasonId(seasonId),
+      getZonesForSeason(seasonId),
     ]);
 
     // Total sap collected (stored in liters)
@@ -172,7 +183,7 @@ class StatsServiceClass {
   async getZoneStats(seasonId) {
     const [collections, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
-      zoneRepository.findBySeasonId(seasonId),
+      getZonesForSeason(seasonId),
     ]);
 
     const zoneStats = [];
@@ -204,7 +215,7 @@ class StatsServiceClass {
   async getWeatherCorrelation(seasonId, lat, lng, temperatureUnit = 'fahrenheit') {
     const [collections, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
-      zoneRepository.findBySeasonId(seasonId),
+      getZonesForSeason(seasonId),
     ]);
 
     if (collections.length === 0) {
@@ -447,7 +458,7 @@ class StatsServiceClass {
   async _computeDetailedWeatherCorrelation(seasonId, lat, lng, temperatureUnit, key) {
     const [collections, zones] = await Promise.all([
       collectionRepository.findBySeasonId(seasonId),
-      zoneRepository.findBySeasonId(seasonId),
+      getZonesForSeason(seasonId),
     ]);
 
     console.log(`[DEBUG] getDetailedWeatherCorrelation: seasonId=${seasonId}, collections=${collections.length}, zones=${zones.length}`);
@@ -637,7 +648,7 @@ class StatsServiceClass {
    */
   async getFlowPredictions(seasonId, lat, lng, temperatureUnit = 'fahrenheit', precomputedCorrelation = null) {
     const detailedCorr = precomputedCorrelation ?? await this.getDetailedWeatherCorrelation(seasonId, lat, lng, temperatureUnit);
-    const zones = await zoneRepository.findBySeasonId(seasonId);
+    const zones = await getZonesForSeason(seasonId);
 
     if (detailedCorr.data.length < 3) {
       console.log('[DEBUG] getFlowPredictions: insufficient data, only', detailedCorr.data.length, 'days');
@@ -839,7 +850,7 @@ class StatsServiceClass {
    */
   async getTraditionalFlowPredictions(seasonId, lat, lng, temperatureUnit = 'fahrenheit', precomputedCorrelation = null) {
     const detailedCorr = precomputedCorrelation ?? await this.getDetailedWeatherCorrelation(seasonId, lat, lng, temperatureUnit);
-    const zones = await zoneRepository.findBySeasonId(seasonId);
+    const zones = await getZonesForSeason(seasonId);
     const totalTaps = zones.reduce((t, z) => t + (z.tapCount || 0), 0);
 
     const data = detailedCorr.data || [];

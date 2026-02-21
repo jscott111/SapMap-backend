@@ -1,5 +1,5 @@
 /**
- * Zone Repository for managing collection zones
+ * Zone Repository (Sugar Bush) - org-scoped, can span seasons
  */
 
 import { BaseRepository } from './BaseRepository.js';
@@ -11,24 +11,31 @@ class ZoneRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Find all zones for a season
+   * Find all zones for an organization
+   */
+  async findByOrganizationId(organizationId) {
+    return this.findBy('organizationId', organizationId);
+  }
+
+  /**
+   * Find all zones for a season (legacy: zones may have seasonId before migration)
    */
   async findBySeasonId(seasonId) {
     return this.findBy('seasonId', seasonId);
   }
 
   /**
-   * Find all zones for a user
+   * Find all zones for a user (legacy)
    */
   async findByUserId(userId) {
     return this.findBy('userId', userId);
   }
 
   /**
-   * Get total tap count for a season
+   * Get total tap count for an organization's zones
    */
-  async getTotalTaps(seasonId) {
-    const zones = await this.findBySeasonId(seasonId);
+  async getTotalTapsForOrg(organizationId) {
+    const zones = await this.findByOrganizationId(organizationId);
     return zones.reduce((total, zone) => total + (zone.tapCount || 0), 0);
   }
 }
