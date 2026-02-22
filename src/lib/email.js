@@ -74,6 +74,68 @@ export async function sendInviteEmail(to, orgName, role, inviteToken) {
   }
 }
 
+/**
+ * Send a password reset email with the reset link.
+ * No-op if RESEND_API_KEY is not set (returns { sent: false }).
+ */
+export async function sendPasswordResetEmail(to, resetLink) {
+  const resend = getResendClient();
+  if (!resend) {
+    return { sent: false, error: 'Email not configured (RESEND_API_KEY)' };
+  }
+
+  const fromEmail = (process.env.RESEND_FROM_EMAIL || 'SapMap <onboarding@resend.dev>').trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; color: #333; max-width: 480px; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 1.25rem; margin-bottom: 16px;">Reset your SapMap password</h1>
+  <p style="margin-bottom: 16px;">We received a request to reset the password for your SapMap account.</p>
+  <p style="margin-bottom: 24px;">Click the button below to choose a new password. This link expires in 1 hour.</p>
+  <p style="margin-bottom: 24px;">
+    <a href="${escapeHtml(resetLink)}" style="display: inline-block; background: #2d5016; color: #fff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600;">Reset password</a>
+  </p>
+  <p style="font-size: 0.875rem; color: #666;">Or copy this link: ${escapeHtml(resetLink)}</p>
+  <p style="font-size: 0.875rem; color: #666; margin-top: 24px;">If you didn't request a password reset, you can ignore this email.</p>
+</body>
+</html>
+`.trim();
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: fromEmail,
+      to: [to],
+      subject: 'Reset your SapMap password',
+      html,
+    });
+
+    if (error) {
+      let message =
+        typeof error === 'object' && error !== null && 'message' in error
+          ? error.message
+          : String(error);
+      if (/only send testing emails to your own|verify a domain|verify your domain/i.test(message)) {
+        message =
+          'To send password reset emails, verify a domain in Resend (resend.com/domains) and set RESEND_FROM_EMAIL to an address on that domain.';
+      }
+      return { sent: false, error: message };
+    }
+    return { sent: true, id: data?.id };
+  } catch (err) {
+    let message = err?.message || String(err);
+    if (/only send testing emails to your own|verify a domain|verify your domain/i.test(message)) {
+      message =
+        'To send password reset emails, verify a domain in Resend (resend.com/domains) and set RESEND_FROM_EMAIL to an address on that domain.';
+    }
+    return { sent: false, error: message };
+  }
+}
+
 function escapeHtml(str) {
   if (str == null) return '';
   const s = String(str);

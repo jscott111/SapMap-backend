@@ -40,6 +40,13 @@ class UserRepositoryClass extends BaseRepository {
   async updatePreferences(userId, preferences) {
     return this.update(userId, { preferences });
   }
+
+  /**
+   * Update user password (e.g. after reset)
+   */
+  async updatePassword(userId, passwordHash) {
+    return this.update(userId, { passwordHash });
+  }
 }
 
 export const userRepository = new UserRepositoryClass();

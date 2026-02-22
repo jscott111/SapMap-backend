@@ -108,6 +108,7 @@ export const Collections = {
   OPERATIONS: 'organizations',
   OPERATION_MEMBERS: 'organizationMembers',
   OPERATION_INVITES: 'organizationInvites',
+  PASSWORD_RESET_TOKENS: 'passwordResetTokens',
 };
 
 /**
