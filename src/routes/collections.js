@@ -7,7 +7,7 @@ import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { userRepository } from '../storage/repositories/UserRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
 
 /** Enrich collections with creator display info (id, name) */
 async function enrichWithCreatedBy(collections) {
@@ -192,7 +192,7 @@ export const collectionRoutes = async (fastify) => {
       if (patchZoneId) {
         const zone = await zoneRepository.findById(patchZoneId);
         if (!zone || !zoneBelongsToSeason(zone, season)) {
-          return reply.code(400).send({ error: 'Zone not found or does not belong to this season\'s organization' });
+          return reply.code(400).send({ error: 'Zone not found or does not belong to this season\'s operation' });
         }
         body.zoneId = patchZoneId;
       } else {

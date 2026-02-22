@@ -12,8 +12,8 @@ dotenv.config();
 import { initFirestore } from '../src/storage/firestore.js';
 import { seasonRepository } from '../src/storage/repositories/SeasonRepository.js';
 import { zoneRepository } from '../src/storage/repositories/ZoneRepository.js';
-import { organizationRepository } from '../src/storage/repositories/OrganizationRepository.js';
-import { organizationMemberRepository } from '../src/storage/repositories/OrganizationMemberRepository.js';
+import { operationRepository } from '../src/storage/repositories/OperationRepository.js';
+import { operationMemberRepository } from '../src/storage/repositories/OperationMemberRepository.js';
 import { userRepository } from '../src/storage/repositories/UserRepository.js';
 
 async function main() {
@@ -37,11 +37,11 @@ async function main() {
       const user = await userRepository.findById(userId);
       const name = user?.name || 'User';
       const orgName = `${name}'s Sugarbush`;
-      const org = await organizationRepository.create({
+      const org = await operationRepository.create({
         name: orgName,
         createdBy: userId,
       });
-      await organizationMemberRepository.addMember(org.id, userId, 'admin', null);
+      await operationMemberRepository.addMember(org.id, userId, 'admin', null);
       console.log(`Created org "${orgName}" (${org.id}) for user ${userId}`);
 
       for (const season of seasons) {

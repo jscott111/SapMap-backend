@@ -6,7 +6,7 @@ import { statsService } from '../services/StatsService.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, hasOrgRole } from '../lib/orgAccess.js';
+import { getMembershipsForUser, canAccessSeason, hasOperationRole } from '../lib/operationAccess.js';
 
 async function resolveLocationForStats(request, reply, season) {
   const { zoneId, lat, lng } = request.query || {};
@@ -15,7 +15,7 @@ async function resolveLocationForStats(request, reply, season) {
     const zone = await zoneRepository.findById(zoneId);
     if (!zone) return reply.code(404).send({ error: 'Zone not found' });
     const orgId = zone.organizationId;
-    if (orgId && !hasOrgRole(request.memberships, orgId, 'read')) {
+    if (orgId && !hasOperationRole(request.memberships, orgId, 'read')) {
       return reply.code(404).send({ error: 'Zone not found' });
     }
     if (!zone.seasonId && !orgId && zone.userId !== request.user.id) {

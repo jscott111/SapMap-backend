@@ -5,12 +5,12 @@
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, canWriteSeason, hasOrgRole } from '../lib/orgAccess.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason, hasOperationRole } from '../lib/operationAccess.js';
 
 async function canWriteZone(zone, userId, memberships) {
   if (!zone) return false;
   const orgId = zone.organizationId;
-  if (orgId) return hasOrgRole(memberships, orgId, 'write');
+  if (orgId) return hasOperationRole(memberships, orgId, 'write');
   if (zone.seasonId) {
     const season = await seasonRepository.findById(zone.seasonId);
     return season && canWriteSeason(userId, season, memberships);
@@ -34,7 +34,7 @@ export const zoneRoutes = async (fastify) => {
   });
 
   /**
-   * Get all zones for an org (organizationId in query) or active season's org
+   * Get all zones for an operation (organizationId in query) or active season's operation
    */
   fastify.get('/', async (request, reply) => {
     let organizationId = request.query.organizationId;
@@ -49,8 +49,8 @@ export const zoneRoutes = async (fastify) => {
       if (!organizationId) return { zones: [] };
     }
 
-    if (!hasOrgRole(request.memberships, organizationId, 'read')) {
-      return reply.code(403).send({ error: 'Access denied to this organization' });
+    if (!hasOperationRole(request.memberships, organizationId, 'read')) {
+      return reply.code(403).send({ error: 'Access denied to this operation' });
     }
     const zones = await zoneRepository.findByOrganizationId(organizationId);
     return { zones };
@@ -63,7 +63,7 @@ export const zoneRoutes = async (fastify) => {
     const zone = await zoneRepository.findById(request.params.id);
     if (!zone) return reply.code(404).send({ error: 'Zone not found' });
     if (zone.organizationId) {
-      if (!hasOrgRole(request.memberships, zone.organizationId, 'read')) {
+      if (!hasOperationRole(request.memberships, zone.organizationId, 'read')) {
         return reply.code(404).send({ error: 'Zone not found' });
       }
     } else if (zone.seasonId) {
@@ -90,13 +90,13 @@ export const zoneRoutes = async (fastify) => {
         request.memberships
       );
       if (!activeSeason?.organizationId) {
-        return reply.code(400).send({ error: 'Organization required. Select an organization or provide organizationId.' });
+        return reply.code(400).send({ error: 'Operation required. Select an operation or provide organizationId.' });
       }
       orgId = activeSeason.organizationId;
     }
 
     if (!hasOrgRole(request.memberships, orgId, 'write')) {
-      return reply.code(403).send({ error: 'Write access required to add zones to this organization' });
+      return reply.code(403).send({ error: 'Write access required to add zones to this operation' });
     }
 
     const locationParsed = parseLocation(location);

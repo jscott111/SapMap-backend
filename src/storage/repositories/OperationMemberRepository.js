@@ -1,18 +1,18 @@
 /**
- * Organization Member Repository for managing org membership and roles
+ * Operation Member Repository for managing operation membership and roles
  */
 
 import { BaseRepository } from './BaseRepository.js';
 import { Collections } from '../firestore.js';
 import { getDb, docToObject } from '../firestore.js';
 
-class OrganizationMemberRepositoryClass extends BaseRepository {
+class OperationMemberRepositoryClass extends BaseRepository {
   constructor() {
-    super(Collections.ORGANIZATION_MEMBERS);
+    super(Collections.OPERATION_MEMBERS);
   }
 
   /**
-   * Add a member to an organization
+   * Add a member to an operation
    */
   async addMember(organizationId, userId, role, invitedBy = null) {
     const existing = await this.getMembership(organizationId, userId);
@@ -27,7 +27,7 @@ class OrganizationMemberRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Get a single membership by org and user
+   * Get a single membership by operation and user
    */
   async getMembership(organizationId, userId) {
     const list = await this.findByConditions([
@@ -38,7 +38,7 @@ class OrganizationMemberRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Get role for user in org (or null if not a member)
+   * Get role for user in operation (or null if not a member)
    */
   async getRole(organizationId, userId) {
     const membership = await this.getMembership(organizationId, userId);
@@ -46,21 +46,21 @@ class OrganizationMemberRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Find all members of an organization
+   * Find all members of an operation
    */
   async findByOrganization(organizationId) {
     return this.findBy('organizationId', organizationId);
   }
 
   /**
-   * Find all org memberships for a user (returns list of { organizationId, role, ... })
+   * Find all operation memberships for a user (returns list of { organizationId, role, ... })
    */
   async findByUser(userId) {
     return this.findBy('userId', userId);
   }
 
   /**
-   * Remove a member from an organization
+   * Remove a member from an operation
    */
   async removeMember(organizationId, userId) {
     const membership = await this.getMembership(organizationId, userId);
@@ -79,7 +79,7 @@ class OrganizationMemberRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Count admins in an organization
+   * Count admins in an operation
    */
   async countAdmins(organizationId) {
     const members = await this.findByOrganization(organizationId);
@@ -87,4 +87,4 @@ class OrganizationMemberRepositoryClass extends BaseRepository {
   }
 }
 
-export const organizationMemberRepository = new OrganizationMemberRepositoryClass();
+export const operationMemberRepository = new OperationMemberRepositoryClass();

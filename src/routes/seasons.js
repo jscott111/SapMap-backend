@@ -4,7 +4,7 @@
 
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
 
 export const seasonRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
@@ -56,14 +56,14 @@ export const seasonRoutes = async (fastify) => {
     const { name, year, startDate, endDate, location, organizationId } = request.body;
 
     if (!organizationId) {
-      return reply.code(400).send({ error: 'Organization is required. Create or select an organization first.' });
+      return reply.code(400).send({ error: 'Operation is required. Create or select an operation first.' });
     }
 
     const hasWrite = (request.memberships || []).some(
       (m) => m.organizationId === organizationId && (m.role === 'write' || m.role === 'admin')
     );
     if (!hasWrite) {
-      return reply.code(403).send({ error: 'Write access required to create seasons in this organization' });
+      return reply.code(403).send({ error: 'Write access required to create seasons in this operation' });
     }
 
     const season = await seasonRepository.create({

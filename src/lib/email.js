@@ -1,5 +1,5 @@
 /**
- * Email sending via Resend (organization invites)
+ * Email sending via Resend (operation invites)
  * Set RESEND_API_KEY and optionally RESEND_FROM_EMAIL, APP_URL in env.
  */
 
@@ -11,7 +11,7 @@ function getResendClient() {
 }
 
 /**
- * Send an organization invite email with the invite link.
+ * Send an operation invite email with the invite link.
  * No-op if RESEND_API_KEY is not set (returns { sent: false }).
  */
 export async function sendInviteEmail(to, orgName, role, inviteToken) {

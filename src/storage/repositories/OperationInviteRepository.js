@@ -1,5 +1,5 @@
 /**
- * Organization Invite Repository for pending invites
+ * Operation Invite Repository for pending invites
  */
 
 import { BaseRepository } from './BaseRepository.js';
@@ -7,9 +7,9 @@ import { Collections } from '../firestore.js';
 
 const INVITE_EXPIRY_DAYS = 7;
 
-class OrganizationInviteRepositoryClass extends BaseRepository {
+class OperationInviteRepositoryClass extends BaseRepository {
   constructor() {
-    super(Collections.ORGANIZATION_INVITES);
+    super(Collections.OPERATION_INVITES);
   }
 
   /**
@@ -37,7 +37,7 @@ class OrganizationInviteRepositoryClass extends BaseRepository {
   }
 
   /**
-   * Find pending invite by org and email
+   * Find pending invite by operation and email
    */
   async findByOrgAndEmail(organizationId, email) {
     const list = await this.findByConditions([
@@ -48,7 +48,7 @@ class OrganizationInviteRepositoryClass extends BaseRepository {
   }
 
   /**
-   * List pending invites for an organization
+   * List pending invites for an operation
    */
   async listByOrganization(organizationId) {
     return this.findBy('organizationId', organizationId);
@@ -64,4 +64,4 @@ class OrganizationInviteRepositoryClass extends BaseRepository {
   }
 }
 
-export const organizationInviteRepository = new OrganizationInviteRepositoryClass();
+export const operationInviteRepository = new OperationInviteRepositoryClass();

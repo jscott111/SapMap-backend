@@ -5,7 +5,7 @@
 import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/orgAccess.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
 
 export const boilRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);

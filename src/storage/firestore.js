@@ -105,9 +105,9 @@ export const Collections = {
   COLLECTIONS: 'collections',
   BOILS: 'boils',
   WEATHER_CACHE: 'weatherCache',
-  ORGANIZATIONS: 'organizations',
-  ORGANIZATION_MEMBERS: 'organizationMembers',
-  ORGANIZATION_INVITES: 'organizationInvites',
+  OPERATIONS: 'organizations',
+  OPERATION_MEMBERS: 'organizationMembers',
+  OPERATION_INVITES: 'organizationInvites',
 };
 
 /**
