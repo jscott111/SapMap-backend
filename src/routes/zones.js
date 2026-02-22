@@ -95,7 +95,7 @@ export const zoneRoutes = async (fastify) => {
       orgId = activeSeason.organizationId;
     }
 
-    if (!hasOrgRole(request.memberships, orgId, 'write')) {
+    if (!hasOperationRole(request.memberships, orgId, 'write')) {
       return reply.code(403).send({ error: 'Write access required to add zones to this operation' });
     }
 

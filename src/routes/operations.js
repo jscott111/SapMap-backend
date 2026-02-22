@@ -8,6 +8,11 @@ import { sendInviteEmail } from '../lib/email.js';
 import { operationMemberRepository } from '../storage/repositories/OperationMemberRepository.js';
 import { operationInviteRepository } from '../storage/repositories/OperationInviteRepository.js';
 import { userRepository } from '../storage/repositories/UserRepository.js';
+import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
+import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
+import { collectionRepository } from '../storage/repositories/CollectionRepository.js';
+import { boilRepository } from '../storage/repositories/BoilRepository.js';
+import * as XLSX from 'xlsx';
 import { authenticate } from '../middleware/auth.js';
 import {
   getMembershipsForUser,
@@ -17,6 +22,13 @@ import {
 
 function normalizeEmail(email) {
   return (email || '').toLowerCase().trim();
+}
+
+/** Excel sheet names: max 31 chars, no \ / ? * [ ] */
+function excelSheetName(season) {
+  const raw = (season.name && String(season.name).trim()) || String(season.year ?? '');
+  const safe = raw.replace(/[\/*?\[\]\\]/g, '').trim().slice(0, 31);
+  return safe || `Season ${season.year ?? ''}`;
 }
 
 export const operationRoutes = async (fastify) => {
@@ -48,6 +60,106 @@ export const operationRoutes = async (fastify) => {
     });
     await operationMemberRepository.addMember(org.id, request.user.id, 'admin', null);
     return { operation: org };
+  });
+
+  /** Export operation data as Excel (one sheet per season, named after the season) */
+  fastify.get('/:id/export', async (request, reply) => {
+    const org = await operationRepository.findById(request.params.id);
+    if (!org) return reply.code(404).send({ error: 'Operation not found' });
+    const memberships = await getMembershipsForUser(request.user.id);
+    if (!hasOperationRole(memberships, org.id, 'read')) {
+      return reply.code(403).send({ error: 'Not a member of this operation' });
+    }
+
+    const [seasons, zones] = await Promise.all([
+      seasonRepository.findByOrganizationId(org.id),
+      zoneRepository.findByOrganizationId(org.id),
+    ]);
+    const zoneMap = Object.fromEntries((zones || []).map((z) => [z.id, z]));
+    const sortedSeasons = [...seasons].sort((a, b) => (b.year || 0) - (a.year || 0));
+
+    const wb = XLSX.utils.book_new();
+    const usedSheetNames = new Set();
+
+    if (sortedSeasons.length === 0) {
+      const ws = XLSX.utils.aoa_to_sheet([['No seasons'], ['This operation has no seasons yet.']]);
+      XLSX.utils.book_append_sheet(wb, ws, 'No seasons');
+    }
+
+    for (const season of sortedSeasons) {
+      const [collections, boils] = await Promise.all([
+        collectionRepository.findBySeasonId(season.id),
+        boilRepository.findBySeasonId(season.id),
+      ]);
+
+      const rows = [];
+      rows.push(['SapMap Operation Export']);
+      rows.push(['Operation', org.name || '']);
+      rows.push(['Season', season.name || `${season.year ?? ''} Season`]);
+      rows.push(['Exported', new Date().toISOString().split('T')[0]]);
+      rows.push([]);
+
+      // Sugar Bushes
+      rows.push(['Sugar Bushes']);
+      rows.push(['Name', 'Tap Count', 'Description', 'Color', 'Latitude', 'Longitude']);
+      for (const z of zones || []) {
+        const loc = z.location && typeof z.location === 'object' ? z.location : null;
+        rows.push([
+          z.name ?? '',
+          z.tapCount ?? '',
+          z.description ?? '',
+          z.color ?? '',
+          loc?.lat ?? '',
+          loc?.lng ?? '',
+        ]);
+      }
+      rows.push([]);
+
+      // Collections
+      rows.push(['Collections']);
+      rows.push(['Date', 'Sugar Bush', 'Volume (L)', 'Sugar Content (%)', 'Notes']);
+      for (const c of collections || []) {
+        const zone = c.zoneId ? zoneMap[c.zoneId] : null;
+        const zoneName = zone?.name ?? (c.zoneId ? c.zoneId : '');
+        const dateStr = typeof c.date === 'string' ? c.date.split('T')[0] : (c.date ?? '');
+        rows.push([dateStr, zoneName, c.volume ?? '', c.sugarContent ?? '', c.notes ?? '']);
+      }
+      rows.push([]);
+
+      // Boils
+      rows.push(['Boils']);
+      rows.push(['Date', 'Sap In (L)', 'Syrup Out (L)', 'Start Time', 'End Time', 'Duration (min)', 'Notes']);
+      for (const b of boils || []) {
+        const dateStr = typeof b.date === 'string' ? b.date.split('T')[0] : (b.date ?? '');
+        rows.push([
+          dateStr,
+          b.sapVolumeIn ?? '',
+          b.syrupVolumeOut ?? '',
+          b.startTime ?? '',
+          b.endTime ?? '',
+          b.duration ?? '',
+          b.notes ?? '',
+        ]);
+      }
+
+      let sheetName = excelSheetName(season);
+      if (usedSheetNames.has(sheetName)) {
+        let n = 1;
+        while (usedSheetNames.has(`${sheetName} (${n})`)) n++;
+        sheetName = `${sheetName} (${n})`.slice(0, 31);
+      }
+      usedSheetNames.add(sheetName);
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    }
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `sapmap-${(org.name || 'operation').replace(/[^a-zA-Z0-9-_]/g, '-')}-${new Date().toISOString().split('T')[0]}.xlsx`;
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .send(buf);
   });
 
   /** Get operation detail + members for all members; invites only for admins. */
