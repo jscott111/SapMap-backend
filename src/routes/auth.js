@@ -16,6 +16,8 @@ export const authRoutes = async (fastify) => {
   /**
    * Register a new user
    */
+  const isValidEmailFormat = (value) => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
   fastify.post('/register', async (request, reply) => {
     const { email, password, name } = request.body;
 
@@ -23,12 +25,18 @@ export const authRoutes = async (fastify) => {
       return reply.code(400).send({ error: 'Email, password, and name are required' });
     }
 
+    if (!isValidEmailFormat(email)) {
+      return reply.code(400).send({ error: 'Please enter a valid email address (e.g. name@gmail.com)' });
+    }
+
     if (password.length < 8) {
       return reply.code(400).send({ error: 'Password must be at least 8 characters' });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Check if user already exists
-    const existingUser = await userRepository.findByEmail(email);
+    const existingUser = await userRepository.findByEmail(normalizedEmail);
     if (existingUser) {
       return reply.code(409).send({ error: 'Email already registered' });
     }
@@ -38,7 +46,7 @@ export const authRoutes = async (fastify) => {
 
     // Create user
     const user = await userRepository.create({
-      email,
+      email: normalizedEmail,
       passwordHash,
       name,
     });
