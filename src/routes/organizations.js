@@ -50,7 +50,7 @@ export const organizationRoutes = async (fastify) => {
     return { organization: org };
   });
 
-  /** Get org detail + members + pending invites (any member can see; admins see invites) */
+  /** Get org detail + members for all members; invites only for admins. */
   fastify.get('/:id', async (request, reply) => {
     const org = await organizationRepository.findById(request.params.id);
     if (!org) return reply.code(404).send({ error: 'Organization not found' });
@@ -58,6 +58,7 @@ export const organizationRoutes = async (fastify) => {
     if (!hasOrgRole(memberships, org.id, 'read')) {
       return reply.code(403).send({ error: 'Not a member of this organization' });
     }
+    const isAdmin = hasOrgRole(memberships, org.id, 'admin');
     const members = await organizationMemberRepository.findByOrganization(org.id);
     const memberUserIds = members.map((m) => m.userId);
     const users = await Promise.all(memberUserIds.map((id) => userRepository.findById(id)));
@@ -67,7 +68,6 @@ export const organizationRoutes = async (fastify) => {
       email: userMap[m.userId]?.email,
       name: userMap[m.userId]?.name,
     }));
-    const isAdmin = hasOrgRole(memberships, org.id, 'admin');
     let invites = [];
     if (isAdmin) {
       invites = await organizationInviteRepository.listByOrganization(org.id);
@@ -167,6 +167,25 @@ export const organizationRoutes = async (fastify) => {
       return reply.code(404).send({ error: 'Invite not found' });
     }
     await organizationInviteRepository.delete(invite.id);
+    return { success: true };
+  });
+
+  /** Leave organization (current user removes themselves; cannot leave if only admin) */
+  fastify.delete('/:id/members/me', async (request, reply) => {
+    const org = await organizationRepository.findById(request.params.id);
+    if (!org) return reply.code(404).send({ error: 'Organization not found' });
+    const membership = await organizationMemberRepository.getMembership(org.id, request.user.id);
+    if (!membership) return reply.code(404).send({ error: 'Not a member of this organization' });
+    if (membership.role === 'admin') {
+      const adminCount = await organizationMemberRepository.countAdmins(org.id);
+      if (adminCount <= 1) {
+        return reply.code(400).send({
+          error: 'Cannot leave: you are the only admin. Assign another admin before leaving.',
+          code: 'MUST_ASSIGN_ADMIN',
+        });
+      }
+    }
+    await organizationMemberRepository.removeMember(org.id, request.user.id);
     return { success: true };
   });
 

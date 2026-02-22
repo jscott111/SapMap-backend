@@ -346,15 +346,22 @@ class WeatherServiceClass {
 
   /**
    * Get current/forecast weather
+   * Returns only today and future days (in the location's timezone) so the forecast always starts with the current day.
    * @param {string} [temperatureUnit] - 'fahrenheit' or 'celsius'
    */
   async getForecast(lat, lng, temperatureUnit = 'fahrenheit') {
     const data = await fetchFromOpenMeteo(lat, lng, {
       pastDays: 0,
-      forecastDays: 7,
+      forecastDays: 8,
     });
 
     let days = parseWeatherResponse(data);
+
+    // Open-Meteo daily boundaries can include the prior day in some timezones. Keep only today and future.
+    const tz = data.timezone || 'UTC';
+    const todayLocal = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    days = days.filter((d) => d.date >= todayLocal).slice(0, 7);
+
     if (temperatureUnit === 'celsius') {
       days = days.map(dayToCelsius);
     }
