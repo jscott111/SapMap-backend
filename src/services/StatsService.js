@@ -890,6 +890,9 @@ class StatsServiceClass {
       }
     }
 
+    /** Reduced flow factor for non-ideal days when we have user's ideal-day average (still some flow possible). */
+    const nonIdealFactor = 0.25;
+
     const predictions = forecast.map((day) => {
       const tempHigh = day.tempHigh ?? 0;
       const tempLow = day.tempLow ?? 0;
@@ -907,6 +910,8 @@ class StatsServiceClass {
             ? Math.round(flowPerTap * totalTaps * 100) / 100
             : 0;
         }
+      } else if (avgIdealVolume != null) {
+        predictedVolume = Math.round(avgIdealVolume * nonIdealFactor * 100) / 100;
       }
 
       return {
@@ -925,7 +930,7 @@ class StatsServiceClass {
       method: 'traditional',
       description: useResearchBased
         ? 'Ideal vs non-ideal from the freeze-thaw rule. Volume = research-based flow per tap (from previous nights\' freezes and thaw strength) × number of taps.'
-        : 'Ideal vs non-ideal from the freeze-thaw rule (cold nights + warm days). Volume on ideal days uses your average collection on ideal days.',
+        : 'Ideal vs non-ideal from the freeze-thaw rule (cold nights + warm days). Volume on ideal days uses your average collection on ideal days; non-ideal days use a reduced estimate.',
       totalDays: data.length,
       totalTaps: totalTaps || null,
       insufficientData: predictions.length === 0,
