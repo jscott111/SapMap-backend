@@ -102,6 +102,7 @@ export const Collections = {
   USERS: 'users',
   SEASONS: 'seasons',
   ZONES: 'zones',
+  SEASON_ZONES: 'seasonZones',
   COLLECTIONS: 'collections',
   BOILS: 'boils',
   WEATHER_CACHE: 'weatherCache',

@@ -6,16 +6,30 @@ import { collectionRepository } from '../storage/repositories/CollectionReposito
 import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
+import { seasonZoneRepository } from '../storage/repositories/SeasonZoneRepository.js';
 import { weatherService, isSapFlowIdeal } from './WeatherService.js';
 
-/** Get zones for a season: by season's org if set, else legacy by seasonId */
-async function getZonesForSeason(seasonId) {
+/** Get zones for a season: included only, with resolved tapCount (per-season override or zone default). */
+export async function getZonesForSeason(seasonId) {
   const season = await seasonRepository.findById(seasonId);
   if (!season) return [];
+  let orgZones;
   if (season.organizationId) {
-    return zoneRepository.findByOrganizationId(season.organizationId);
+    orgZones = await zoneRepository.findByOrganizationId(season.organizationId);
+  } else {
+    orgZones = await zoneRepository.findBySeasonId(seasonId);
   }
-  return zoneRepository.findBySeasonId(seasonId);
+  const seasonZones = await seasonZoneRepository.findBySeasonId(seasonId);
+  const byZoneId = new Map(seasonZones.map((sz) => [sz.zoneId, sz]));
+
+  const result = [];
+  for (const zone of orgZones) {
+    const sz = byZoneId.get(zone.id);
+    if (sz && sz.included === false) continue;
+    const resolvedTapCount = sz?.tapCount ?? zone.tapCount ?? 0;
+    result.push({ ...zone, tapCount: resolvedTapCount });
+  }
+  return result;
 }
 
 /** Peak flow per tap per day (liters) under ideal freeze-thaw conditions. ~1.5 gal/tap/day from research. */

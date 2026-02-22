@@ -3,8 +3,10 @@
  */
 
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
+import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
+import { seasonZoneRepository } from '../storage/repositories/SeasonZoneRepository.js';
 import { authenticate } from '../middleware/auth.js';
-import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
+import { getMembershipsForUser, canAccessSeason, canWriteSeason, hasOperationRole } from '../lib/operationAccess.js';
 
 export const seasonRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
@@ -91,6 +93,56 @@ export const seasonRoutes = async (fastify) => {
     }
     const updated = await seasonRepository.update(request.params.id, request.body);
     return { season: updated };
+  });
+
+  /**
+   * Update a zone's settings for a season (tap count override, include/exclude from season).
+   * Body: { tapCount?: number, included?: boolean }
+   */
+  fastify.patch('/:seasonId/zones/:zoneId', async (request, reply) => {
+    const { seasonId, zoneId } = request.params;
+    const season = await seasonRepository.findById(seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
+      return reply.code(404).send({ error: 'Season not found' });
+    }
+    const orgId = season.organizationId;
+    if (!orgId || !hasOperationRole(request.memberships, orgId, 'write')) {
+      return reply.code(403).send({ error: 'Write access required' });
+    }
+    const zone = await zoneRepository.findById(zoneId);
+    if (!zone || zone.organizationId !== orgId) {
+      return reply.code(404).send({ error: 'Zone not found' });
+    }
+    const { tapCount, included } = request.body || {};
+    const data = {};
+    if (tapCount !== undefined) data.tapCount = Number(tapCount);
+    if (included !== undefined) data.included = Boolean(included);
+    if (Object.keys(data).length === 0) {
+      return reply.code(400).send({ error: 'Provide tapCount and/or included' });
+    }
+    const seasonZone = await seasonZoneRepository.set(seasonId, zoneId, data);
+    return { seasonZone };
+  });
+
+  /**
+   * Remove a zone's override for a season (revert to included with zone default tap count).
+   */
+  fastify.delete('/:seasonId/zones/:zoneId', async (request, reply) => {
+    const { seasonId, zoneId } = request.params;
+    const season = await seasonRepository.findById(seasonId);
+    if (!season || !canWriteSeason(request.user.id, season, request.memberships)) {
+      return reply.code(404).send({ error: 'Season not found' });
+    }
+    const orgId = season.organizationId;
+    if (!orgId || !hasOperationRole(request.memberships, orgId, 'write')) {
+      return reply.code(403).send({ error: 'Write access required' });
+    }
+    const zone = await zoneRepository.findById(zoneId);
+    if (!zone || zone.organizationId !== orgId) {
+      return reply.code(404).send({ error: 'Zone not found' });
+    }
+    await seasonZoneRepository.delete(seasonId, zoneId);
+    return { success: true };
   });
 
   /**

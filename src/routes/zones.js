@@ -4,6 +4,8 @@
 
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
+import { seasonZoneRepository } from '../storage/repositories/SeasonZoneRepository.js';
+import { getZonesForSeason } from '../services/StatsService.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason, hasOperationRole } from '../lib/operationAccess.js';
 
@@ -34,10 +36,12 @@ export const zoneRoutes = async (fastify) => {
   });
 
   /**
-   * Get all zones for an operation (organizationId in query) or active season's operation
+   * Get all zones for an operation (organizationId in query) or active season's operation.
+   * Optional seasonId: when present, return only zones included in that season with resolved tapCount.
    */
   fastify.get('/', async (request, reply) => {
-    let organizationId = request.query.organizationId;
+    const { organizationId: queryOrgId, seasonId } = request.query;
+    let organizationId = queryOrgId;
 
     if (!organizationId) {
       const activeSeason = await seasonRepository.findActiveSeason(
@@ -52,8 +56,49 @@ export const zoneRoutes = async (fastify) => {
     if (!hasOperationRole(request.memberships, organizationId, 'read')) {
       return reply.code(403).send({ error: 'Access denied to this operation' });
     }
+
+    if (seasonId) {
+      const season = await seasonRepository.findById(seasonId);
+      if (!season || season.organizationId !== organizationId) {
+        return reply.code(404).send({ error: 'Season not found' });
+      }
+      if (!canAccessSeason(request.user.id, season, request.memberships)) {
+        return reply.code(403).send({ error: 'Access denied to this season' });
+      }
+      const zones = await getZonesForSeason(seasonId);
+      return { zones };
+    }
+
     const zones = await zoneRepository.findByOrganizationId(organizationId);
     return { zones };
+  });
+
+  /**
+   * Get season overrides for a zone (tap count and included per season)
+   */
+  fastify.get('/:id/season-overrides', async (request, reply) => {
+    const zone = await zoneRepository.findById(request.params.id);
+    if (!zone) return reply.code(404).send({ error: 'Zone not found' });
+    if (zone.organizationId) {
+      if (!hasOperationRole(request.memberships, zone.organizationId, 'read')) {
+        return reply.code(404).send({ error: 'Zone not found' });
+      }
+    } else if (zone.seasonId) {
+      const season = await seasonRepository.findById(zone.seasonId);
+      if (!season || !canAccessSeason(request.user.id, season, request.memberships)) {
+        return reply.code(404).send({ error: 'Zone not found' });
+      }
+    } else if (zone.userId !== request.user.id) {
+      return reply.code(404).send({ error: 'Zone not found' });
+    }
+    const overrides = await seasonZoneRepository.findByZoneId(request.params.id);
+    return {
+      overrides: overrides.map((o) => ({
+        seasonId: o.seasonId,
+        tapCount: o.tapCount,
+        included: o.included,
+      })),
+    };
   });
 
   /**
