@@ -5,7 +5,20 @@
 import jwt from 'jsonwebtoken';
 import { userRepository } from '../storage/repositories/UserRepository.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+const DEV_SECRET = 'dev-secret-change-in-production';
+const isProduction = process.env.NODE_ENV === 'production';
+
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET || DEV_SECRET;
+  if (isProduction && (!secret || secret === DEV_SECRET)) {
+    throw new Error(
+      'JWT_SECRET must be set to a non-default value in production. Set the JWT_SECRET environment variable.'
+    );
+  }
+  return secret;
+}
+
+const JWT_SECRET = getJwtSecret();
 
 /**
  * Generate a JWT token for a user
@@ -40,6 +53,7 @@ export const authenticate = async (request, reply) => {
     const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      request.log?.warn?.({ auth: 'missing' }, '401: Authentication required (no or invalid Authorization header)');
       return reply.code(401).send({ error: 'Authentication required' });
     }
 
@@ -47,6 +61,7 @@ export const authenticate = async (request, reply) => {
     const decoded = verifyToken(token);
 
     if (!decoded) {
+      request.log?.warn?.({ auth: 'invalid_or_expired' }, '401: Invalid or expired token');
       return reply.code(401).send({ error: 'Invalid or expired token' });
     }
 
@@ -54,12 +69,14 @@ export const authenticate = async (request, reply) => {
     const user = await userRepository.findById(decoded.id);
 
     if (!user) {
+      request.log?.warn?.({ auth: 'user_not_found', userId: decoded.id }, '401: User not found');
       return reply.code(401).send({ error: 'User not found' });
     }
 
     // Attach user to request
     request.user = user;
   } catch (error) {
+    request.log?.warn?.({ err: error, auth: 'failed' }, '401: Authentication failed');
     return reply.code(401).send({ error: 'Authentication failed' });
   }
 };
