@@ -32,6 +32,7 @@ API server for the SapMap maple sap production tracking application.
    - `JWT_SECRET`: A secure random string for signing tokens
    - `GOOGLE_CLOUD_PROJECT_ID`: Your GCP project ID
    - `FIRESTORE_EMULATOR_HOST`: Set to `localhost:8181` for local development
+   - `REDIS_URL` (optional): For realtime live updates across multiple backend instances (e.g. Cloud Run). If unset, realtime is in-memory only (single instance).
 
 ### Running with Firestore Emulator
 

@@ -8,6 +8,7 @@ import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { userRepository } from '../storage/repositories/UserRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
+import { trigger } from '../realtime/pusherRealtime.js';
 
 /** Enrich collections with creator display info (id, name) */
 async function enrichWithCreatedBy(collections) {
@@ -174,6 +175,9 @@ export const collectionRoutes = async (fastify) => {
       temperature,
       weatherData,
     });
+    if (season.organizationId) {
+      trigger(season.organizationId, { type: 'collection:created', collection });
+    }
     return { collection };
   });
 
@@ -200,6 +204,9 @@ export const collectionRoutes = async (fastify) => {
       }
     }
     const updated = await collectionRepository.update(request.params.id, body);
+    if (season.organizationId) {
+      trigger(season.organizationId, { type: 'collection:updated', collection: updated });
+    }
     return { collection: updated };
   });
 
@@ -214,6 +221,9 @@ export const collectionRoutes = async (fastify) => {
       return reply.code(404).send({ error: 'Collection not found' });
     }
     await collectionRepository.delete(request.params.id);
+    if (season.organizationId) {
+      trigger(season.organizationId, { type: 'collection:deleted', id: request.params.id });
+    }
     return { success: true };
   });
 };

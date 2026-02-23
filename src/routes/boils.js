@@ -6,6 +6,7 @@ import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
+import { trigger } from '../realtime/pusherRealtime.js';
 
 export const boilRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
@@ -101,6 +102,10 @@ export const boilRoutes = async (fastify) => {
       duration: calculatedDuration,
       notes,
     });
+    const season = await seasonRepository.findById(targetSeasonId);
+    if (season?.organizationId) {
+      trigger(season.organizationId, { type: 'boil:created', boil });
+    }
     return { boil };
   });
 
@@ -115,6 +120,9 @@ export const boilRoutes = async (fastify) => {
       return reply.code(404).send({ error: 'Boil not found' });
     }
     const updated = await boilRepository.update(request.params.id, request.body);
+    if (season.organizationId) {
+      trigger(season.organizationId, { type: 'boil:updated', boil: updated });
+    }
     return { boil: updated };
   });
 
@@ -129,6 +137,9 @@ export const boilRoutes = async (fastify) => {
       return reply.code(404).send({ error: 'Boil not found' });
     }
     await boilRepository.delete(request.params.id);
+    if (season.organizationId) {
+      trigger(season.organizationId, { type: 'boil:deleted', id: request.params.id });
+    }
     return { success: true };
   });
 };

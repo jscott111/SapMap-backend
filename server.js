@@ -8,6 +8,7 @@ dotenv.config();
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import formbody from '@fastify/formbody';
 import { initFirestore } from './src/storage/firestore.js';
 
 // Import routes
@@ -20,6 +21,7 @@ import { weatherRoutes } from './src/routes/weather.js';
 import { statsRoutes } from './src/routes/stats.js';
 import { operationRoutes } from './src/routes/operations.js';
 import { inviteRoutes } from './src/routes/invites.js';
+import { realtimeRoutes } from './src/routes/realtime.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -49,6 +51,8 @@ await fastify.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 });
+
+await fastify.register(formbody);
 
 // Security headers
 fastify.addHook('onSend', async (request, reply, payload) => {
@@ -99,6 +103,7 @@ const start = async () => {
     await fastify.register(statsRoutes, { prefix: '/api/stats' });
     await fastify.register(operationRoutes, { prefix: '/api/operations' });
     await fastify.register(inviteRoutes, { prefix: '/api/invites' });
+    await fastify.register(realtimeRoutes, { prefix: '/api/realtime' });
 
     const port = process.env.PORT || 3001;
     const host = process.env.HOST || '0.0.0.0';
