@@ -73,8 +73,10 @@ export const authRoutes = async (fastify) => {
       return reply.code(400).send({ error: 'Email and password are required' });
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Find user
-    const user = await userRepository.findByEmail(email);
+    const user = await userRepository.findByEmail(normalizedEmail);
     if (!user) {
       return reply.code(401).send({ error: 'Invalid email or password' });
     }
