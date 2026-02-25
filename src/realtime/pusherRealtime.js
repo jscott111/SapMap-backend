@@ -7,6 +7,7 @@ import Pusher from 'pusher';
 const CHANNEL_PREFIX = 'private-operation-';
 
 let pusher = null;
+let notConfiguredLogged = false;
 
 function getPusher() {
   if (pusher) return pusher;
@@ -14,7 +15,19 @@ function getPusher() {
   const key = process.env.PUSHER_KEY;
   const secret = process.env.PUSHER_SECRET;
   const cluster = process.env.PUSHER_CLUSTER;
-  if (!appId || !key || !secret || !cluster) return null;
+  if (!appId || !key || !secret || !cluster) {
+    if (!notConfiguredLogged) {
+      notConfiguredLogged = true;
+      const missing = [
+        !appId && 'PUSHER_APP_ID',
+        !key && 'PUSHER_KEY',
+        !secret && 'PUSHER_SECRET',
+        !cluster && 'PUSHER_CLUSTER',
+      ].filter(Boolean);
+      console.warn('[Pusher] Realtime disabled in production: set env vars:', missing.join(', '));
+    }
+    return null;
+  }
   pusher = new Pusher({
     appId,
     key,

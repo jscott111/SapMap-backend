@@ -32,17 +32,18 @@ const fastify = Fastify({
   bodyLimit: 1048576, // 1MB
 });
 
-// CORS configuration
+// CORS configuration (production: set ALLOWED_ORIGINS e.g. https://app.sapmap.ca — no trailing slash, exact origin)
 await fastify.register(cors, {
   origin: isProduction
     ? (origin, cb) => {
         const allowed = process.env.ALLOWED_ORIGINS?.trim();
-        const allowedOrigins = allowed ? allowed.split(',').map((o) => o.trim()) : [];
+        const allowedOrigins = allowed ? allowed.split(',').map((o) => o.trim()).filter(Boolean) : [];
         if (allowedOrigins.length === 0) {
           cb(null, true);
         } else if (!origin || allowedOrigins.includes(origin)) {
           cb(null, true);
         } else {
+          console.warn('[CORS] Rejected origin:', origin, 'Allowed:', allowedOrigins.join(', '));
           cb(new Error('Not allowed by CORS'), false);
         }
       }

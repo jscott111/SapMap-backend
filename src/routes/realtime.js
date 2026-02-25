@@ -17,6 +17,7 @@ export const realtimeRoutes = async (fastify) => {
   fastify.post('/pusher-auth', async (request, reply) => {
     const pusher = getPusher();
     if (!pusher) {
+      request.log.warn('Pusher auth called but Pusher not configured (missing PUSHER_* env vars)');
       return reply.code(503).send({ error: 'Realtime not configured' });
     }
     const { socket_id: socketId, channel_name: channelName } = request.body || {};
@@ -29,9 +30,11 @@ export const realtimeRoutes = async (fastify) => {
     }
     const memberships = await getMembershipsForUser(request.user.id);
     if (!hasOperationRole(memberships, operationId, 'read')) {
+      request.log.warn({ operationId, userId: request.user.id }, 'Pusher auth: access denied to operation');
       return reply.code(403).send({ error: 'Access denied to this operation' });
     }
     const auth = pusher.authorizeChannel(socketId, channelName);
+    request.log.debug({ operationId }, 'Pusher auth OK');
     return auth;
   });
 };

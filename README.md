@@ -105,6 +105,20 @@ API server for the SapMap maple sap production tracking application.
 - `GET /api/stats/zones` - Get zone-level stats
 - `GET /api/stats/weather-correlation` - Get weather correlation data
 
+### Realtime (Pusher) in production
+
+Live updates (collections/boils) use [Pusher Channels](https://pusher.com/channels). For production:
+
+1. **Backend** – set all four in the backend container/service:
+   - `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER`
+   - Get them from [Pusher Dashboard](https://dashboard.pusher.com). If any are missing, the backend logs `[Pusher] Realtime disabled` and `/api/realtime/pusher-auth` returns 503.
+
+2. **Frontend** – set on the **frontend** container (e.g. Cloud Run service env) so `config.json` gets key and cluster:
+   - `PUSHER_KEY`, `PUSHER_CLUSTER` (same values as backend)
+   - The frontend Docker entrypoint writes these into `/config.json`. If they’re missing, the app runs but realtime is disabled (check browser console for `[SapMap] Realtime disabled`).
+
+3. **CORS** – ensure `ALLOWED_ORIGINS` on the backend includes your frontend origin (e.g. `https://app.sapmap.ca`) so the Pusher auth request succeeds.
+
 ### Invite emails (optional)
 
 When an org admin creates an invite, the backend can email the invite link to the recipient using [Resend](https://resend.com). If email is not configured, the invite is not created and the API returns an error (so the admin can fix config and try again).
@@ -128,3 +142,5 @@ Set in `.env`:
 | `RESEND_API_KEY` | Resend API key for invite emails | (optional) |
 | `RESEND_FROM_EMAIL` | From address for invite emails | `SapMap <onboarding@resend.dev>` |
 | `APP_URL` | Frontend base URL for invite links | `http://localhost:5173` |
+| `ALLOWED_ORIGINS` | Comma-separated origins for CORS (production); must include frontend origin for Pusher auth | (optional) |
+| `PUSHER_APP_ID`, `PUSHER_KEY`, `PUSHER_SECRET`, `PUSHER_CLUSTER` | Pusher Channels credentials for realtime; all four required for realtime in production | (optional) |
