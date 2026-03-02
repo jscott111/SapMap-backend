@@ -5,8 +5,22 @@
 import { notificationRepository } from '../storage/repositories/NotificationRepository.js';
 import { pushSubscriptionRepository } from '../storage/repositories/PushSubscriptionRepository.js';
 import { operationMemberRepository } from '../storage/repositories/OperationMemberRepository.js';
+import { userRepository } from '../storage/repositories/UserRepository.js';
 import { trigger } from '../realtime/pusherRealtime.js';
 import { sendPush } from '../lib/webPush.js';
+
+const TYPE_TO_PREF = {
+  collection_created: 'notifyCollectionCreated',
+  boil_created: 'notifyBoilStarted',
+  boil_sap_adjusted: 'notifyBoilSapAdjusted',
+};
+
+function prefAllowsType(preferences, type) {
+  const key = TYPE_TO_PREF[type];
+  if (!key) return true;
+  const val = preferences?.[key];
+  return val !== false;
+}
 
 /**
  * Notify a set of users (creates notification doc per user, triggers Pusher for operation channel, sends Web Push to each user's subscriptions).
@@ -62,6 +76,7 @@ export async function notifyUsers({ userIds, operationId, type, title, body, dat
 
 /**
  * Notify all members of an operation (resolve member userIds, then notifyUsers).
+ * Filters out users who have disabled this notification type in preferences.
  * @param {string} [opts.excludeUserId] - user ID to exclude (e.g. the actor who triggered the action)
  */
 export async function notifyOperationMembers({ operationId, type, title, body, data, excludeUserId }) {
@@ -69,15 +84,29 @@ export async function notifyOperationMembers({ operationId, type, title, body, d
 
   const members = await operationMemberRepository.findByOrganization(operationId);
   let userIds = [...new Set(members.map((m) => m.userId).filter(Boolean))];
-  if (excludeUserId) {
-    userIds = userIds.filter((id) => id !== excludeUserId);
+  if (excludeUserId != null) {
+    const exclude = String(excludeUserId);
+    userIds = userIds.filter((id) => String(id) !== exclude);
   }
   if (userIds.length === 0) return;
+
+  const allowed = [];
+  for (const userId of userIds) {
+    try {
+      const user = await userRepository.findById(userId);
+      if (user && prefAllowsType(user.preferences, type)) {
+        allowed.push(userId);
+      }
+    } catch (_) {
+      allowed.push(userId);
+    }
+  }
+  if (allowed.length === 0) return;
 
   const payloadData = { ...(data || {}), ...(excludeUserId && { actorUserId: excludeUserId }) };
 
   await notifyUsers({
-    userIds,
+    userIds: allowed,
     operationId,
     type,
     title,
