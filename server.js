@@ -90,6 +90,11 @@ fastify.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
 });
 
+// Public: VAPID public key for web push (no auth). Frontend/PWA fetches this when config.json has no key.
+fastify.get('/api/notifications/vapid-public-key', async () => {
+  return { publicKey: process.env.WEB_PUSH_PUBLIC_KEY || '' };
+});
+
 // Initialize Firestore and register routes
 const start = async () => {
   try {
