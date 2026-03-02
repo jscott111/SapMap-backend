@@ -215,6 +215,26 @@ export function isSapFlowIdeal(tempHigh, tempLow, temperatureUnit = 'fahrenheit'
   return tempLow < 32 && tempHigh > 40;
 }
 
+/**
+ * Sap flow tier: ideal (freeze-thaw), marginal (thaw + swing but no hard freeze), or none.
+ * Marginal: tempHigh > 38°F (3.3°C), tempLow < 38°F, and diurnal swing >= 5°F (2.8°C).
+ */
+export function getSapFlowTier(tempHigh, tempLow, temperatureUnit = 'fahrenheit') {
+  const high = tempHigh ?? 0;
+  const low = tempLow ?? 0;
+  const swing = high - low;
+  if (temperatureUnit === 'celsius') {
+    if (low < 0 && high > 4.4) return 'ideal';
+    const marginalSwing = 2.8;
+    if (high > 3.3 && low < 3.3 && swing >= marginalSwing) return 'marginal';
+    return 'none';
+  }
+  if (low < 32 && high > 40) return 'ideal';
+  const marginalSwing = 5;
+  if (high > 38 && low < 38 && swing >= marginalSwing) return 'marginal';
+  return 'none';
+}
+
 /** Convert temps in a day object from F to C */
 function dayToCelsius(day) {
   const fToC = (f) => Math.round((f - 32) * (5 / 9) * 10) / 10;

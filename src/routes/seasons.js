@@ -96,8 +96,8 @@ export const seasonRoutes = async (fastify) => {
   });
 
   /**
-   * Update a zone's settings for a season (tap count override, include/exclude from season).
-   * Body: { tapCount?: number, included?: boolean }
+   * Update a zone's settings for a season (tap count override, include/exclude from season, vacuum).
+   * Body: { tapCount?: number, included?: boolean, vacuumInHg?: number | null }
    */
   fastify.patch('/:seasonId/zones/:zoneId', async (request, reply) => {
     const { seasonId, zoneId } = request.params;
@@ -113,12 +113,13 @@ export const seasonRoutes = async (fastify) => {
     if (!zone || zone.organizationId !== orgId) {
       return reply.code(404).send({ error: 'Zone not found' });
     }
-    const { tapCount, included } = request.body || {};
+    const { tapCount, included, vacuumInHg } = request.body || {};
     const data = {};
     if (tapCount !== undefined) data.tapCount = Number(tapCount);
     if (included !== undefined) data.included = Boolean(included);
+    if (vacuumInHg !== undefined) data.vacuumInHg = vacuumInHg == null ? null : Number(vacuumInHg);
     if (Object.keys(data).length === 0) {
-      return reply.code(400).send({ error: 'Provide tapCount and/or included' });
+      return reply.code(400).send({ error: 'Provide tapCount, included, and/or vacuumInHg' });
     }
     const seasonZone = await seasonZoneRepository.set(seasonId, zoneId, data);
     return { seasonZone };

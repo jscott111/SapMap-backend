@@ -97,6 +97,7 @@ export const zoneRoutes = async (fastify) => {
         seasonId: o.seasonId,
         tapCount: o.tapCount,
         included: o.included,
+        vacuumInHg: o.vacuumInHg,
       })),
     };
   });

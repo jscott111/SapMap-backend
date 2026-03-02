@@ -7,7 +7,7 @@ import { boilRepository } from '../storage/repositories/BoilRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
 import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { seasonZoneRepository } from '../storage/repositories/SeasonZoneRepository.js';
-import { weatherService, isSapFlowIdeal } from './WeatherService.js';
+import { weatherService, isSapFlowIdeal, getSapFlowTier } from './WeatherService.js';
 
 /** Get zones for a season: included only, with resolved tapCount (per-season override or zone default). */
 export async function getZonesForSeason(seasonId) {
@@ -27,13 +27,25 @@ export async function getZonesForSeason(seasonId) {
     const sz = byZoneId.get(zone.id);
     if (sz && sz.included === false) continue;
     const resolvedTapCount = sz?.tapCount ?? zone.tapCount ?? 0;
-    result.push({ ...zone, tapCount: resolvedTapCount });
+    const vacuumInHg = sz?.vacuumInHg ?? zone.vacuumInHg ?? 0;
+    result.push({ ...zone, tapCount: resolvedTapCount, vacuumInHg: Number(vacuumInHg) || 0 });
   }
   return result;
 }
 
 /** Peak flow per tap per day (liters) under ideal freeze-thaw conditions. ~1.5 gal/tap/day from research. */
 const DEFAULT_LITERS_PER_TAP_PER_DAY = 5.68;
+
+/** Standard pressure (hPa) for pressure modifier; lower pressure → more flow. */
+const PRESSURE_REF_HPA = 1013.25;
+/** Strength of pressure effect: factor = 1 + PRESSURE_EFFECT_K * (pressureRef - pressure) / pressureRef */
+const PRESSURE_EFFECT_K = 0.15;
+
+/** Vacuum multiplier: 1 + (vacuumInHg / 25) * VACUUM_EFFECT_F so ~25 inHg gives ~1.8–2× bucket. */
+const VACUUM_EFFECT_F = 1.0;
+
+/** Marginal flow factor (applied to base ideal volume when tier is marginal). */
+const MARGINAL_FLOW_FACTOR = 0.45;
 
 function prevDateStr(dateStr, offset) {
   const d = new Date(dateStr);
@@ -72,6 +84,36 @@ function researchBasedFlowPerTap(day, prev1, prev2, temperatureUnit) {
 
   const flowPerTap = DEFAULT_LITERS_PER_TAP_PER_DAY * thawStrength * prevNightFactor * prev2Factor;
   return Math.round(flowPerTap * 100) / 100;
+}
+
+/**
+ * Research-based flow per tap for marginal days (thaw + swing, no hard freeze).
+ * Uses thaw strength from daytime high only; scaled by MARGINAL_FLOW_FACTOR vs ideal.
+ */
+function researchBasedFlowPerTapMarginal(day, temperatureUnit) {
+  const isF = temperatureUnit !== 'celsius';
+  const thawThresh = isF ? 38 : 3.3;
+  const thawRange = isF ? 25 : 14;
+  const tempHigh = day.tempHigh ?? 0;
+  const thawStrength = Math.min(1, Math.max(0, (tempHigh - thawThresh) / thawRange));
+  const flowPerTap = DEFAULT_LITERS_PER_TAP_PER_DAY * MARGINAL_FLOW_FACTOR * thawStrength;
+  return Math.round(flowPerTap * 100) / 100;
+}
+
+/**
+ * Pressure modifier: lower pressure → more flow. Returns factor to multiply volume by.
+ */
+function pressureModifier(pressureHpa) {
+  if (pressureHpa == null || !Number.isFinite(pressureHpa)) return 1;
+  return 1 + PRESSURE_EFFECT_K * (PRESSURE_REF_HPA - pressureHpa) / PRESSURE_REF_HPA;
+}
+
+/**
+ * Vacuum multiplier: higher vacuum (in Hg) → more flow vs bucket. 0 = 1×.
+ */
+function vacuumMultiplier(vacuumInHg) {
+  if (!vacuumInHg || vacuumInHg <= 0) return 1;
+  return 1 + (vacuumInHg / 25) * VACUUM_EFFECT_F;
 }
 
 /**
@@ -691,9 +733,10 @@ class StatsServiceClass {
     const avgSunshine = useSunshine 
       ? data.reduce((sum, d) => sum + (d.sunshineHours || 0), 0) / data.length 
       : 0;
-    const avgPressure = usePressure 
-      ? data.reduce((sum, d) => sum + (d.pressure || 0), 0) / data.length 
-      : 0;
+    const pressureValues = data.map((d) => d.pressure).filter((p) => p != null && Number.isFinite(p));
+    const avgPressure = pressureValues.length > 0
+      ? pressureValues.reduce((a, b) => a + b, 0) / pressureValues.length
+      : PRESSURE_REF_HPA;
     const avgHumidity = useHumidity 
       ? data.reduce((sum, d) => sum + (d.humidity || 0), 0) / data.length 
       : 0;
@@ -701,9 +744,8 @@ class StatsServiceClass {
       ? data.reduce((sum, d) => sum + (d.windSpeed || 0), 0) / data.length 
       : 0;
 
-    const featureNames = ['intercept', 'tempHigh', 'tempLow', 'tempDelta', 'prevDayTempHigh', 'prevDayTempLow', 'idealConditions'];
+    const featureNames = ['intercept', 'tempHigh', 'tempLow', 'tempDelta', 'prevDayTempHigh', 'prevDayTempLow', 'idealConditions', 'pressure'];
     if (useSunshine) featureNames.push('sunshineHours');
-    if (usePressure) featureNames.push('pressure');
     if (useHumidity) featureNames.push('humidity');
     if (useWindSpeed) featureNames.push('windSpeed');
 
@@ -716,9 +758,9 @@ class StatsServiceClass {
         d.prevDayTempHigh ?? (useFallbacks ? d.tempHigh : 0),
         d.prevDayTempLow ?? (useFallbacks ? d.tempLow : 0),
         d.idealConditions ? 1 : 0,
+        d.pressure ?? avgPressure,
       ];
       if (useSunshine) row.push(d.sunshineHours ?? avgSunshine);
-      if (usePressure) row.push(d.pressure ?? avgPressure);
       if (useHumidity) row.push(d.humidity ?? avgHumidity);
       if (useWindSpeed) row.push(d.windSpeed ?? avgWindSpeed);
       return row;
@@ -756,13 +798,16 @@ class StatsServiceClass {
         return { predictions: [], insufficientData: true, totalDays: data.length };
       }
       console.log('[DEBUG] getFlowPredictions: minimal fallback succeeded with 3 features');
+      const effectiveVacuumMult = totalTaps > 0
+        ? zones.reduce((sum, z) => sum + (z.tapCount || 0) * vacuumMultiplier(z.vacuumInHg || 0), 0) / totalTaps
+        : 1;
       const forecast = await weatherService.getForecast(lat, lng, temperatureUnit);
       const predictions = forecast.map((day) => {
         const tempHigh = day.tempHigh ?? 0;
         const tempLow = day.tempLow ?? 0;
         const feat = [1, tempHigh, tempLow];
         let predictedVolume = model.coefficients.reduce((sum, c, j) => sum + c * feat[j], 0);
-        predictedVolume = Math.max(0, Math.round(predictedVolume * 100) / 100);
+        predictedVolume = Math.max(0, Math.round(predictedVolume * effectiveVacuumMult * 100) / 100);
         return {
           date: day.date,
           predictedVolume,
@@ -809,9 +854,8 @@ class StatsServiceClass {
       const prevLow = prev1?.tempLow ?? tempLow;
       const idealForSap = isSapFlowIdeal(tempHigh, tempLow, temperatureUnit);
 
-      const fullFeat = [1, tempHigh, tempLow, tempDelta, prevHigh, prevLow, idealForSap ? 1 : 0];
+      const fullFeat = [1, tempHigh, tempLow, tempDelta, prevHigh, prevLow, idealForSap ? 1 : 0, day.pressure ?? avgPressure];
       if (useSunshine) fullFeat.push(day.sunshineHours ?? avgSunshine);
-      if (usePressure) fullFeat.push(day.pressure ?? avgPressure);
       if (useHumidity) fullFeat.push(day.humidity ?? avgHumidity);
       if (useWindSpeed) fullFeat.push(day.windSpeed ?? avgWindSpeed);
 
@@ -822,6 +866,11 @@ class StatsServiceClass {
         predictedVolume += model.coefficients[j] * feat[j];
       }
       predictedVolume = Math.max(0, Math.round(predictedVolume * 100) / 100);
+
+      const effectiveVacuumMult = totalTaps > 0
+        ? zones.reduce((sum, z) => sum + (z.tapCount || 0) * vacuumMultiplier(z.vacuumInHg || 0), 0) / totalTaps
+        : 1;
+      predictedVolume = Math.round(predictedVolume * effectiveVacuumMult * 100) / 100;
 
       predictions.push({
         date,
@@ -890,29 +939,43 @@ class StatsServiceClass {
       }
     }
 
-    /** Reduced flow factor for non-ideal days when we have user's ideal-day average (still some flow possible). */
-    const nonIdealFactor = 0.25;
+    /** Reduced flow factor for none-tier days when we have user's ideal-day average. */
+    const noneFactor = 0.25;
+
+    /** Tap-weighted vacuum multiplier for the season. */
+    const effectiveVacuumMult = totalTaps > 0
+      ? zones.reduce((sum, z) => sum + (z.tapCount || 0) * vacuumMultiplier(z.vacuumInHg || 0), 0) / totalTaps
+      : 1;
 
     const predictions = forecast.map((day) => {
       const tempHigh = day.tempHigh ?? 0;
       const tempLow = day.tempLow ?? 0;
-      const idealForSap = isSapFlowIdeal(tempHigh, tempLow, temperatureUnit);
+      const tier = getSapFlowTier(tempHigh, tempLow, temperatureUnit);
+      const idealForSap = tier === 'ideal';
 
-      let predictedVolume = 0;
-      if (idealForSap) {
+      let baseVolume = 0;
+      if (tier === 'ideal') {
         if (avgIdealVolume != null) {
-          predictedVolume = Math.round(avgIdealVolume * 100) / 100;
+          baseVolume = avgIdealVolume;
         } else {
           const prev1 = weatherByDate.get(prevDateStr(day.date, 1)) ?? null;
           const prev2 = weatherByDate.get(prevDateStr(day.date, 2)) ?? null;
           const flowPerTap = researchBasedFlowPerTap(day, prev1, prev2, temperatureUnit);
-          predictedVolume = totalTaps > 0
-            ? Math.round(flowPerTap * totalTaps * 100) / 100
-            : 0;
+          baseVolume = totalTaps > 0 ? flowPerTap * totalTaps : 0;
+        }
+      } else if (tier === 'marginal') {
+        if (avgIdealVolume != null) {
+          baseVolume = avgIdealVolume * MARGINAL_FLOW_FACTOR;
+        } else {
+          const flowPerTap = researchBasedFlowPerTapMarginal(day, temperatureUnit);
+          baseVolume = totalTaps > 0 ? flowPerTap * totalTaps : 0;
         }
       } else if (avgIdealVolume != null) {
-        predictedVolume = Math.round(avgIdealVolume * nonIdealFactor * 100) / 100;
+        baseVolume = avgIdealVolume * noneFactor;
       }
+
+      const pressureFactor = pressureModifier(day.pressure ?? null);
+      let predictedVolume = Math.round(baseVolume * pressureFactor * effectiveVacuumMult * 100) / 100;
 
       return {
         date: day.date,

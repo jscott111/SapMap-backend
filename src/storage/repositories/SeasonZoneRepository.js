@@ -64,8 +64,8 @@ class SeasonZoneRepositoryClass {
    * Create or update seasonZone for (seasonId, zoneId).
    * @param {string} seasonId
    * @param {string} zoneId
-   * @param {{ tapCount?: number, included?: boolean }} data
-   * @returns {Promise<{ id, seasonId, zoneId, tapCount?, included: boolean }>}
+   * @param {{ tapCount?: number, included?: boolean, vacuumInHg?: number | null }} data
+   * @returns {Promise<{ id, seasonId, zoneId, tapCount?, included: boolean, vacuumInHg? }>}
    */
   async set(seasonId, zoneId, data) {
     const id = docId(seasonId, zoneId);
@@ -78,6 +78,7 @@ class SeasonZoneRepositoryClass {
       zoneId,
       ...(data.tapCount !== undefined && { tapCount: data.tapCount }),
       ...(data.included !== undefined && { included: data.included }),
+      ...(data.vacuumInHg !== undefined && { vacuumInHg: data.vacuumInHg == null ? null : Number(data.vacuumInHg) }),
     });
 
     if (existing.exists) {
