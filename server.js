@@ -22,6 +22,7 @@ import { statsRoutes } from './src/routes/stats.js';
 import { operationRoutes } from './src/routes/operations.js';
 import { inviteRoutes } from './src/routes/invites.js';
 import { realtimeRoutes } from './src/routes/realtime.js';
+import { notificationRoutes } from './src/routes/notifications.js';
 import { adminRoutes } from './src/routes/admin.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -106,6 +107,7 @@ const start = async () => {
     await fastify.register(operationRoutes, { prefix: '/api/operations' });
     await fastify.register(inviteRoutes, { prefix: '/api/invites' });
     await fastify.register(realtimeRoutes, { prefix: '/api/realtime' });
+    await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
 
     const port = process.env.PORT || 3001;
