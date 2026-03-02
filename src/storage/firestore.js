@@ -110,6 +110,8 @@ export const Collections = {
   OPERATION_MEMBERS: 'organizationMembers',
   OPERATION_INVITES: 'organizationInvites',
   PASSWORD_RESET_TOKENS: 'passwordResetTokens',
+  NOTIFICATIONS: 'notifications',
+  PUSH_SUBSCRIPTIONS: 'pushSubscriptions',
 };
 
 /**

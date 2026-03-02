@@ -9,6 +9,8 @@ import { userRepository } from '../storage/repositories/UserRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
 import { trigger } from '../realtime/pusherRealtime.js';
+import { notifyOperationMembers } from '../services/NotificationService.js';
+import { convertVolume } from '../services/StatsService.js';
 
 /** Enrich collections with creator display info (id, name) */
 async function enrichWithCreatedBy(collections) {
@@ -177,6 +179,23 @@ export const collectionRoutes = async (fastify) => {
     });
     if (season.organizationId) {
       trigger(season.organizationId, { type: 'collection:created', collection });
+      const creatorName = request.user?.name || 'Someone';
+      const unit = request.user?.preferences?.units || 'liters';
+      const vol = collection.volume != null ? Number(collection.volume) : 0;
+      const displayVol = unit === 'gallons' ? convertVolume(vol, 'liters', 'gallons') : vol;
+      const volStr = `${typeof displayVol === 'number' && !Number.isNaN(displayVol) ? displayVol.toFixed(1) : displayVol} ${unit === 'gallons' ? 'gal' : 'L'}`;
+      const brixStr =
+        collection.sugarContent != null && collection.sugarContent !== ''
+          ? ` at ${Number(collection.sugarContent)}% brix`
+          : '';
+      notifyOperationMembers({
+        operationId: season.organizationId,
+        type: 'collection_created',
+        title: 'New collection',
+        body: `${creatorName} collected ${volStr} of sap${brixStr}.`,
+        data: { collectionId: collection.id, seasonId: targetSeasonId },
+        excludeUserId: request.user.id,
+      }).catch((err) => console.error('[notifications]', err?.message));
     }
     return { collection };
   });

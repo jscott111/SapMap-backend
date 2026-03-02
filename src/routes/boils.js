@@ -7,6 +7,8 @@ import { seasonRepository } from '../storage/repositories/SeasonRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { getMembershipsForUser, canAccessSeason, canWriteSeason } from '../lib/operationAccess.js';
 import { trigger } from '../realtime/pusherRealtime.js';
+import { notifyOperationMembers } from '../services/NotificationService.js';
+import { convertVolume } from '../services/StatsService.js';
 
 export const boilRoutes = async (fastify) => {
   fastify.addHook('preHandler', authenticate);
@@ -105,6 +107,15 @@ export const boilRoutes = async (fastify) => {
     const season = await seasonRepository.findById(targetSeasonId);
     if (season?.organizationId) {
       trigger(season.organizationId, { type: 'boil:created', boil });
+      const creatorName = request.user?.name || 'Someone';
+      notifyOperationMembers({
+        operationId: season.organizationId,
+        type: 'boil_created',
+        title: 'Boil started',
+        body: `${creatorName} has started boiling!`,
+        data: { tag: 'sapmap-boil', boilId: boil.id, seasonId: targetSeasonId, path: '/boils' },
+        excludeUserId: request.user.id,
+      }).catch((err) => console.error('[notifications]', err?.message));
     }
     return { boil };
   });
@@ -129,6 +140,23 @@ export const boilRoutes = async (fastify) => {
     const updated = await boilRepository.update(request.params.id, { sapVolumeIn: newSap });
     if (season.organizationId) {
       trigger(season.organizationId, { type: 'boil:updated', boil: updated });
+      const creatorName = request.user?.name || 'Someone';
+      const unit = request.user?.preferences?.units || 'liters';
+      const absLiters = Math.abs(deltaLiters);
+      const displayVol = unit === 'gallons' ? convertVolume(absLiters, 'liters', 'gallons') : absLiters;
+      const volStr = `${typeof displayVol === 'number' && !Number.isNaN(displayVol) ? displayVol.toFixed(1) : displayVol} ${unit === 'gallons' ? 'gal' : 'L'}`;
+      const body =
+        deltaLiters >= 0
+          ? `${creatorName} added another ${volStr} to the boil.`
+          : `${creatorName} removed ${volStr} from the boil.`;
+      notifyOperationMembers({
+        operationId: season.organizationId,
+        type: 'boil_sap_adjusted',
+        title: 'Boil updated',
+        body,
+        data: { tag: 'sapmap-boil', boilId: updated.id, seasonId: season.id, path: '/boils' },
+        excludeUserId: request.user.id,
+      }).catch((err) => console.error('[notifications]', err?.message));
     }
     return { boil: updated };
   });
