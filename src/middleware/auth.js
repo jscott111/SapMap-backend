@@ -82,6 +82,20 @@ export const authenticate = async (request, reply) => {
 };
 
 /**
+ * Require admin email (single allowed admin). Use after authenticate.
+ * Returns 403 if request.user.email is not the allowed admin.
+ */
+const ADMIN_EMAIL = 'johnascott14@gmail.com';
+
+export const requireAdmin = async (request, reply) => {
+  const email = request.user?.email;
+  if (!email || String(email).toLowerCase() !== ADMIN_EMAIL) {
+    request.log?.warn?.({ auth: 'admin_forbidden', email: email ? '***' : 'none' }, '403: Admin access denied');
+    return reply.code(403).send({ error: 'Forbidden' });
+  }
+};
+
+/**
  * Fastify plugin to add authentication hook
  */
 export const authPlugin = async (fastify) => {
