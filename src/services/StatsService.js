@@ -213,6 +213,8 @@ class StatsServiceClass {
       ? sapPending / yieldRatio
       : 0;
 
+    const seasonLength = (new Date(collections[0]?.date) - new Date(collections[collections.length - 1]?.date)) / (1000 * 60 * 60 * 24);
+
     return {
       totalSapCollected: Math.round(totalSapCollected * 100) / 100,
       totalSapProcessed: Math.round(totalSapProcessed * 100) / 100,
@@ -224,7 +226,7 @@ class StatsServiceClass {
       totalTaps,
       sapPerTap: sapPerTap ? Math.round(sapPerTap * 100) / 100 : null,
       syrupPerTap: syrupPerTap ? Math.round(syrupPerTap * 1000) / 1000 : null,
-      collectionDays,
+      seasonLength,
       boilSessions,
       totalBoilTimeMinutes: Math.round(totalBoilTime),
       avgCollectionPerDay: Math.round(avgCollectionPerDay * 100) / 100,
