@@ -232,7 +232,8 @@ class StatsServiceClass {
       ? sapPending / effectiveYieldRatioForEstimate
       : 0;
 
-    const seasonLength = (new Date(collections[0]?.date) - new Date(collections[collections.length - 1]?.date)) / (1000 * 60 * 60 * 24);
+    let seasonLength = (new Date(collections[0]?.date) - new Date(collections[collections.length - 1]?.date)) / (1000 * 60 * 60 * 24);
+    seasonLength = seasonLength === 0 && collections.length > 0 ? 1 : seasonLength;
 
     return {
       totalSapCollected: Math.round(totalSapCollected * 100) / 100,
