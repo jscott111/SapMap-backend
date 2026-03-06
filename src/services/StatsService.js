@@ -47,6 +47,9 @@ const VACUUM_EFFECT_F = 1.0;
 /** Marginal flow factor (applied to base ideal volume when tier is marginal). */
 const MARGINAL_FLOW_FACTOR = 0.45;
 
+/** Default sap-to-syrup ratio (40:1) when no boils exist for the operation. */
+const DEFAULT_YIELD_RATIO = 40;
+
 function prevDateStr(dateStr, offset) {
   const d = new Date(dateStr);
   d.setDate(d.getDate() - offset);
@@ -158,7 +161,8 @@ class StatsServiceClass {
    * Get comprehensive stats for a season (all volumes in liters)
    */
   async getSeasonStats(seasonId) {
-    const [collections, boils, zones] = await Promise.all([
+    const [season, collections, boils, zones] = await Promise.all([
+      seasonRepository.findById(seasonId),
       collectionRepository.findBySeasonId(seasonId),
       boilRepository.findBySeasonId(seasonId),
       getZonesForSeason(seasonId),
@@ -173,10 +177,25 @@ class StatsServiceClass {
     // Total syrup produced
     const totalSyrupProduced = boils.reduce((t, b) => t + (b.syrupVolumeOut || 0), 0);
 
-    // Yield ratio (sap to syrup)
+    // Yield ratio (sap to syrup) for this season (for display)
     const yieldRatio = totalSyrupProduced > 0
       ? totalSapProcessed / totalSyrupProduced
       : null;
+
+    // For estimating pending syrup: use average yield ratio across all boils for this operation (all years), or 40:1 if none
+    let allBoils = boils;
+    if (season?.organizationId) {
+      const operationSeasons = await seasonRepository.findByOrganizationId(season.organizationId);
+      const operationBoils = await Promise.all(
+        operationSeasons.map((s) => boilRepository.findBySeasonId(s.id))
+      );
+      allBoils = operationBoils.flat();
+    }
+    const validBoils = allBoils.filter((b) => (b.sapVolumeIn || 0) > 0 && (b.syrupVolumeOut || 0) > 0);
+    const totalSapAll = validBoils.reduce((t, b) => t + (b.sapVolumeIn || 0), 0);
+    const totalSyrupAll = validBoils.reduce((t, b) => t + (b.syrupVolumeOut || 0), 0);
+    const averageYieldRatioForEstimate = totalSyrupAll > 0 ? totalSapAll / totalSyrupAll : null;
+    const effectiveYieldRatioForEstimate = averageYieldRatioForEstimate ?? DEFAULT_YIELD_RATIO;
 
     // Average sugar content (Brix)
     const collectionsWithBrix = collections.filter((c) => c.sugarContent > 0);
@@ -207,10 +226,10 @@ class StatsServiceClass {
       ? totalSapCollected / collectionDays
       : 0;
 
-    // Estimated remaining syrup (based on sap collected but not yet processed)
+    // Estimated remaining syrup (based on sap collected but not yet processed; uses operation-wide average yield ratio or 40:1 default)
     const sapPending = totalSapCollected - totalSapProcessed;
-    const estimatedPendingSyrup = yieldRatio && sapPending > 0
-      ? sapPending / yieldRatio
+    const estimatedPendingSyrup = sapPending > 0
+      ? sapPending / effectiveYieldRatioForEstimate
       : 0;
 
     const seasonLength = (new Date(collections[0]?.date) - new Date(collections[collections.length - 1]?.date)) / (1000 * 60 * 60 * 24);
