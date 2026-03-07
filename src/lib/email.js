@@ -136,6 +136,60 @@ export async function sendPasswordResetEmail(to, resetLink) {
   }
 }
 
+const DEFAULT_CONTACT_TO_EMAIL = 'johnascott14@gmail.com';
+
+/**
+ * Send a contact form email to the app owner.
+ * No-op if RESEND_API_KEY is not set (returns { sent: false }).
+ * @param {{ fromEmail: string, fromName?: string, subject?: string, message: string }} opts
+ */
+export async function sendContactEmail({ fromEmail, fromName, subject, message }) {
+  const resend = getResendClient();
+  if (!resend) {
+    return { sent: false, error: 'Email not configured (RESEND_API_KEY)' };
+  }
+
+  const toEmail = (process.env.CONTACT_TO_EMAIL || DEFAULT_CONTACT_TO_EMAIL).trim();
+  const fromEmailHeader = (process.env.RESEND_FROM_EMAIL || 'SapMap <onboarding@resend.dev>').trim();
+  const displayFrom = fromName ? `${escapeHtml(fromName)} &lt;${escapeHtml(fromEmail)}&gt;` : escapeHtml(fromEmail);
+  const subjectLine = subject && String(subject).trim() ? escapeHtml(String(subject).trim()) : 'SapMap question';
+  const messageBody = escapeHtml(String(message)).replace(/\n/g, '<br>');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; color: #333; max-width: 560px; margin: 0 auto; padding: 24px;">
+  <h1 style="font-size: 1.25rem; margin-bottom: 16px;">SapMap contact form</h1>
+  <p style="margin-bottom: 8px;"><strong>From:</strong> ${displayFrom}</p>
+  <p style="margin-bottom: 16px;"><strong>Subject:</strong> ${subjectLine}</p>
+  <p style="margin-bottom: 8px;"><strong>Message:</strong></p>
+  <p style="white-space: pre-wrap; background: #f5f5f5; padding: 12px; border-radius: 8px;">${messageBody}</p>
+</body>
+</html>
+`.trim();
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: fromEmailHeader,
+      to: [toEmail],
+      subject: `SapMap: ${subjectLine}`,
+      html,
+    });
+
+    if (error) {
+      const msg = typeof error === 'object' && error !== null && 'message' in error ? error.message : String(error);
+      return { sent: false, error: msg };
+    }
+    return { sent: true, id: data?.id };
+  } catch (err) {
+    return { sent: false, error: err?.message || String(err) };
+  }
+}
+
 function escapeHtml(str) {
   if (str == null) return '';
   const s = String(str);

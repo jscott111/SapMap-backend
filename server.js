@@ -24,6 +24,7 @@ import { inviteRoutes } from './src/routes/invites.js';
 import { realtimeRoutes } from './src/routes/realtime.js';
 import { notificationRoutes } from './src/routes/notifications.js';
 import { adminRoutes } from './src/routes/admin.js';
+import { contactRoutes } from './src/routes/contact.js';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -114,6 +115,7 @@ const start = async () => {
     await fastify.register(realtimeRoutes, { prefix: '/api/realtime' });
     await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
     await fastify.register(adminRoutes, { prefix: '/api/admin' });
+    await fastify.register(contactRoutes, { prefix: '/api/contact' });
 
     const port = process.env.PORT || 3001;
     const host = process.env.HOST || '0.0.0.0';
