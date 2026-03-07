@@ -29,6 +29,7 @@ class UserRepositoryClass extends BaseRepository {
         units: 'gallons',
         temperatureUnit: 'fahrenheit',
         timezone: 'America/New_York',
+        unitOnboardingCompleted: false,
       },
     };
     return super.create(data);
