@@ -6,6 +6,7 @@
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { userRepository } from '../storage/repositories/UserRepository.js';
 import { zoneRepository } from '../storage/repositories/ZoneRepository.js';
+import { operationMemberRepository } from '../storage/repositories/OperationMemberRepository.js';
 import { getDb } from '../storage/firestore.js';
 import { docToObject } from '../storage/firestore.js';
 import { Collections } from '../storage/firestore.js';
@@ -31,6 +32,27 @@ function sanitizeUser(doc) {
   return rest;
 }
 
+/**
+ * Returns a Set of organizationIds where at least one admin's email contains '+test'.
+ * Used to exclude test operations from the admin zones map and stats.
+ */
+async function getOrganizationIdsWithTestAdmin(organizationIds) {
+  const orgIds = [...new Set(organizationIds)].filter(Boolean);
+  const result = new Set();
+  for (const orgId of orgIds) {
+    const members = await operationMemberRepository.findByOrganization(orgId);
+    const admins = members.filter((m) => m.role === 'admin');
+    for (const admin of admins) {
+      const user = await userRepository.findById(admin.userId);
+      if (user?.email && user.email.toLowerCase().includes('+test')) {
+        result.add(orgId);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 export const adminRoutes = async (fastify) => {
   const preHandlers = [authenticate, requireAdmin];
 
@@ -40,10 +62,13 @@ export const adminRoutes = async (fastify) => {
     return { users: users.map(sanitizeUser) };
   });
 
-  /** GET /api/admin/zones - list all zones (for map + browse) */
+  /** GET /api/admin/zones - list all zones (for map + browse). Excludes zones in operations whose admin email contains '+test'. */
   fastify.get('/zones', { preHandler: preHandlers }, async () => {
     const zones = await zoneRepository.findAll();
-    return { zones };
+    const orgIds = [...new Set(zones.map((z) => z.organizationId).filter(Boolean))];
+    const testOrgIds = await getOrganizationIdsWithTestAdmin(orgIds);
+    const filtered = zones.filter((z) => !z.organizationId || !testOrgIds.has(z.organizationId));
+    return { zones: filtered };
   });
 
   /** GET /api/admin/collections/:collectionName?limit=100 - browse a collection (read-only) */
@@ -75,22 +100,26 @@ export const adminRoutes = async (fastify) => {
     return { documents: docs, count: docs.length };
   });
 
-  /** GET /api/admin/stats - counts for dashboard */
+  /** GET /api/admin/stats - counts for dashboard. Excludes operations whose admin email contains '+test' from zones and operations counts. */
   fastify.get('/stats', { preHandler: preHandlers }, async () => {
-    const [users, zones] = await Promise.all([
+    const [users, zones, orgsSnapshot] = await Promise.all([
       userRepository.findAll(),
       zoneRepository.findAll(),
+      getDb().collection(Collections.OPERATIONS).get(),
     ]);
-    const zonesWithLocation = zones.filter(
+    const allOrgIds = orgsSnapshot.docs.map((d) => d.id);
+    const testOrgIds = await getOrganizationIdsWithTestAdmin(allOrgIds);
+    const filteredZones = zones.filter((z) => !z.organizationId || !testOrgIds.has(z.organizationId));
+    const zonesWithLocation = filteredZones.filter(
       (z) => z.location && typeof z.location === 'object' && z.location.lat != null && z.location.lng != null
     );
-    const orgsSnapshot = await getDb().collection(Collections.OPERATIONS).get();
+    const filteredOperationsCount = orgsSnapshot.docs.filter((d) => !testOrgIds.has(d.id)).length;
 
     return {
       users: users.length,
-      zones: zones.length,
+      zones: filteredZones.length,
       zonesWithLocation: zonesWithLocation.length,
-      operations: orgsSnapshot.size,
+      operations: filteredOperationsCount,
     };
   });
 };
