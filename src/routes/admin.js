@@ -62,9 +62,13 @@ export const adminRoutes = async (fastify) => {
     return { users: users.map(sanitizeUser) };
   });
 
-  /** GET /api/admin/zones - list all zones (for map + browse). Excludes zones in operations whose admin email contains '+test'. */
-  fastify.get('/zones', { preHandler: preHandlers }, async () => {
+  /** GET /api/admin/zones - list all zones (for map + browse). Excludes zones in operations whose admin email contains '+test', unless the requesting admin is a +test user (so they can see their own zones). */
+  fastify.get('/zones', { preHandler: preHandlers }, async (request) => {
     const zones = await zoneRepository.findAll();
+    const isTestAdmin = request.user?.email?.toLowerCase().includes('+test');
+    if (isTestAdmin) {
+      return { zones };
+    }
     const orgIds = [...new Set(zones.map((z) => z.organizationId).filter(Boolean))];
     const testOrgIds = await getOrganizationIdsWithTestAdmin(orgIds);
     const filtered = zones.filter((z) => !z.organizationId || !testOrgIds.has(z.organizationId));
@@ -100,21 +104,25 @@ export const adminRoutes = async (fastify) => {
     return { documents: docs, count: docs.length };
   });
 
-  /** GET /api/admin/stats - counts for dashboard. Excludes operations whose admin email contains '+test' from zones and operations counts. */
-  fastify.get('/stats', { preHandler: preHandlers }, async () => {
+  /** GET /api/admin/stats - counts for dashboard. Excludes operations whose admin email contains '+test' from zones and operations counts, unless the requesting admin is a +test user. */
+  fastify.get('/stats', { preHandler: preHandlers }, async (request) => {
     const [users, zones, orgsSnapshot] = await Promise.all([
       userRepository.findAll(),
       zoneRepository.findAll(),
       getDb().collection(Collections.OPERATIONS).get(),
     ]);
-    const allOrgIds = orgsSnapshot.docs.map((d) => d.id);
-    const testOrgIds = await getOrganizationIdsWithTestAdmin(allOrgIds);
-    const filteredZones = zones.filter((z) => !z.organizationId || !testOrgIds.has(z.organizationId));
+    const isTestAdmin = request.user?.email?.toLowerCase().includes('+test');
+    let filteredZones = zones;
+    let filteredOperationsCount = orgsSnapshot.docs.length;
+    if (!isTestAdmin) {
+      const allOrgIds = orgsSnapshot.docs.map((d) => d.id);
+      const testOrgIds = await getOrganizationIdsWithTestAdmin(allOrgIds);
+      filteredZones = zones.filter((z) => !z.organizationId || !testOrgIds.has(z.organizationId));
+      filteredOperationsCount = orgsSnapshot.docs.filter((d) => !testOrgIds.has(d.id)).length;
+    }
     const zonesWithLocation = filteredZones.filter(
       (z) => z.location && typeof z.location === 'object' && z.location.lat != null && z.location.lng != null
     );
-    const filteredOperationsCount = orgsSnapshot.docs.filter((d) => !testOrgIds.has(d.id)).length;
-
     return {
       users: users.length,
       zones: filteredZones.length,

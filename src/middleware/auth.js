@@ -82,14 +82,14 @@ export const authenticate = async (request, reply) => {
 };
 
 /**
- * Require admin email (single allowed admin). Use after authenticate.
- * Returns 403 if request.user.email is not the allowed admin.
+ * Require admin email (allowed admins). Use after authenticate.
+ * Returns 403 if request.user.email is not in the allowed list.
  */
-const ADMIN_EMAIL = 'johnascott14@gmail.com';
+const ADMIN_EMAILS = ['johnascott14@gmail.com', 'johnascott14+test@gmail.com'];
 
 export const requireAdmin = async (request, reply) => {
   const email = request.user?.email;
-  if (!email || String(email).toLowerCase() !== ADMIN_EMAIL) {
+  if (!email || !ADMIN_EMAILS.includes(String(email).toLowerCase())) {
     request.log?.warn?.({ auth: 'admin_forbidden', email: email ? '***' : 'none' }, '403: Admin access denied');
     return reply.code(403).send({ error: 'Forbidden' });
   }
