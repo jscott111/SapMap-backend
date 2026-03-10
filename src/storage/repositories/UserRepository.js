@@ -3,7 +3,7 @@
  */
 
 import { BaseRepository } from './BaseRepository.js';
-import { Collections } from '../firestore.js';
+import { Collections, dateToTimestamp } from '../firestore.js';
 
 class UserRepositoryClass extends BaseRepository {
   constructor() {
@@ -31,8 +31,25 @@ class UserRepositoryClass extends BaseRepository {
         timezone: 'America/New_York',
         unitOnboardingCompleted: false,
       },
+      legalConsent: userData.legalConsent || null,
     };
     return super.create(data);
+  }
+
+  /**
+   * Record legal consent (ToS and Privacy Policy) for a user
+   */
+  async recordConsent(userId, { tosVersion, privacyVersion, ip, userAgent }) {
+    const now = dateToTimestamp(new Date());
+    const legalConsent = {
+      tosAcceptedAt: now,
+      tosVersion,
+      privacyAcceptedAt: now,
+      privacyVersion,
+      ...(ip != null && { consentIp: ip }),
+      ...(userAgent != null && { consentUserAgent: userAgent }),
+    };
+    return this.update(userId, { legalConsent });
   }
 
   /**

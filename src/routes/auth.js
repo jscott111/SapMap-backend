@@ -8,6 +8,8 @@ import { userRepository } from '../storage/repositories/UserRepository.js';
 import { passwordResetTokenRepository } from '../storage/repositories/PasswordResetTokenRepository.js';
 import { generateToken, authenticate } from '../middleware/auth.js';
 import { sendPasswordResetEmail } from '../lib/email.js';
+import { REQUIRED_LEGAL_VERSIONS } from '../constants/legal.js';
+import { dateToTimestamp } from '../storage/firestore.js';
 
 const SALT_ROUNDS = 10;
 const APP_URL = (process.env.APP_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -19,10 +21,14 @@ export const authRoutes = async (fastify) => {
   const isValidEmailFormat = (value) => typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
   fastify.post('/register', async (request, reply) => {
-    const { email, password, name } = request.body;
+    const { email, password, name, tosAccepted, privacyAccepted } = request.body;
 
     if (!email || !password || !name) {
       return reply.code(400).send({ error: 'Email, password, and name are required' });
+    }
+
+    if (tosAccepted !== true || privacyAccepted !== true) {
+      return reply.code(400).send({ error: 'You must agree to the Terms of Service and Privacy Policy to create an account' });
     }
 
     if (!isValidEmailFormat(email)) {
@@ -34,6 +40,7 @@ export const authRoutes = async (fastify) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const now = dateToTimestamp(new Date());
 
     // Check if user already exists
     const existingUser = await userRepository.findByEmail(normalizedEmail);
@@ -44,11 +51,24 @@ export const authRoutes = async (fastify) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
+    const consentIp = request.ip || request.headers['x-forwarded-for'] || request.headers['x-real-ip'];
+    const consentUserAgent = request.headers['user-agent'];
+
+    const legalConsent = {
+      tosAcceptedAt: now,
+      tosVersion: REQUIRED_LEGAL_VERSIONS.tos,
+      privacyAcceptedAt: now,
+      privacyVersion: REQUIRED_LEGAL_VERSIONS.privacy,
+      ...(consentIp && { consentIp: typeof consentIp === 'string' ? consentIp.split(',')[0].trim() : String(consentIp) }),
+      ...(consentUserAgent && { consentUserAgent }),
+    };
+
     // Create user
     const user = await userRepository.create({
       email: normalizedEmail,
       passwordHash,
       name,
+      legalConsent,
     });
 
     // Generate token
@@ -104,6 +124,26 @@ export const authRoutes = async (fastify) => {
    */
   fastify.get('/me', { preHandler: authenticate }, async (request) => {
     const { passwordHash: _, ...userWithoutPassword } = request.user;
+    return { user: userWithoutPassword };
+  });
+
+  /**
+   * Accept Terms of Service and Privacy Policy (for existing users or re-acceptance)
+   */
+  fastify.post('/accept-terms', { preHandler: authenticate }, async (request, reply) => {
+    const { tosVersion, privacyVersion } = request.body || {};
+    if (tosVersion !== REQUIRED_LEGAL_VERSIONS.tos || privacyVersion !== REQUIRED_LEGAL_VERSIONS.privacy) {
+      return reply.code(400).send({ error: 'Invalid legal version. Please refresh and accept the current terms.' });
+    }
+    const consentIp = request.ip || request.headers['x-forwarded-for'] || request.headers['x-real-ip'];
+    const consentUserAgent = request.headers['user-agent'];
+    const updatedUser = await userRepository.recordConsent(request.user.id, {
+      tosVersion,
+      privacyVersion,
+      ip: typeof consentIp === 'string' ? consentIp.split(',')[0].trim() : consentIp,
+      userAgent: consentUserAgent,
+    });
+    const { passwordHash: _, ...userWithoutPassword } = updatedUser;
     return { user: userWithoutPassword };
   });
 
